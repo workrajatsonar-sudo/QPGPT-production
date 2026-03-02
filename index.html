@@ -1,0 +1,195 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QPGPT - AI Learning Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        background-color: var(--page-bg);
+        color: var(--text-main);
+        background-image: var(--bg-pattern);
+        background-attachment: fixed;
+      }
+      
+      /* Smooth transitions for theme switching */
+      *, *::before, *::after {
+        transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform;
+        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+        transition-duration: 300ms;
+      }
+
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--border-col);
+        border-radius: 10px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--text-muted);
+      }
+
+      /* --- THEME DEFINITIONS --- */
+
+      /* 1. LIGHT THEME (Clean SaaS) */
+      :root, [data-theme='white'] {
+        --page-bg: #F8F9FC;         
+        --bg-pattern: radial-gradient(#E2E8F0 1px, transparent 1px);
+        --bg-size: 20px 20px;
+        
+        --card-bg: #FFFFFF;         
+        --sidebar-bg: #FFFFFF;      
+        --header-bg: rgba(255, 255, 255, 0.85);
+        
+        --text-main: #1E293B;       
+        --text-muted: #64748B;      
+        --text-inv: #FFFFFF;
+
+        --border-col: #E2E8F0;      
+        --input-bg: #F1F5F9;
+        
+        --accent-primary: #4F46E5;  /* Indigo-600 */
+        --accent-hover: #4338CA;    /* Indigo-700 */
+        --accent-subtle: #EEF2FF;   /* Indigo-50 */
+        
+        --glass-border: rgba(255, 255, 255, 0.5);
+        --shadow-sm: 0 2px 4px 0 rgb(0 0 0 / 0.02);
+        --shadow-md: 0 10px 30px -10px rgb(0 0 0 / 0.08);
+      }
+
+      /* 2. BLACK THEME (Modern Dark) */
+      [data-theme='black'] {
+        --page-bg: #09090B;         
+        --bg-pattern: none;
+        
+        --card-bg: #18181B;         
+        --sidebar-bg: #09090B;      
+        --header-bg: rgba(9, 9, 11, 0.8);
+        
+        --text-main: #FAFAFA;       
+        --text-muted: #A1A1AA;      
+        --text-inv: #09090B;
+
+        --border-col: #27272A;      
+        --input-bg: #27272A;
+
+        --accent-primary: #6366F1;  /* Indigo-500 */
+        --accent-hover: #818CF8;    /* Indigo-400 */
+        --accent-subtle: #1E1B4B;   /* Indigo-950 */
+        
+        --glass-border: rgba(255,255,255,0.05);
+        --shadow-sm: none;
+        --shadow-md: 0 0 0 1px #27272A;
+      }
+
+      /* 3. SPACE THEME (Futuristic) */
+      [data-theme='space'] {
+        --page-bg: #0F172A;         
+        --bg-pattern: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.15) 0%, transparent 50%);
+        
+        --card-bg: rgba(30, 41, 59, 0.6); 
+        --sidebar-bg: rgba(15, 23, 42, 0.6);
+        --header-bg: rgba(15, 23, 42, 0.7);
+        
+        --text-main: #E2E8F0;       
+        --text-muted: #94A3B8;      
+        --text-inv: #FFFFFF;
+
+        --border-col: rgba(148, 163, 184, 0.15);
+        --input-bg: rgba(15, 23, 42, 0.5);
+
+        --accent-primary: #8B5CF6;  
+        --accent-hover: #A78BFA;    
+        --accent-subtle: rgba(139, 92, 246, 0.15);
+        
+        --glass-border: rgba(255,255,255,0.08);
+        --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+      }
+      
+      body[data-theme='white'] { background-size: var(--bg-size); }
+    </style>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Plus Jakarta Sans', 'sans-serif'],
+            },
+            colors: {
+              page: 'var(--page-bg)',
+              card: 'var(--card-bg)',
+              sidebar: 'var(--sidebar-bg)',
+              header: 'var(--header-bg)',
+              
+              txt: 'var(--text-main)',
+              muted: 'var(--text-muted)',
+              inv: 'var(--text-inv)',
+              
+              border: 'var(--border-col)',
+              input: 'var(--input-bg)',
+              
+              brand: 'var(--accent-primary)',
+              'brand-hover': 'var(--accent-hover)',
+              'brand-subtle': 'var(--accent-subtle)',
+
+              // Aliases
+              accent: 'var(--accent-subtle)',
+              'accent-text': 'var(--accent-primary)',
+            },
+            boxShadow: {
+              'glass': 'var(--shadow-md)',
+              'subtle': 'var(--shadow-sm)',
+            },
+            borderColor: {
+              DEFAULT: 'var(--border-col)',
+              glass: 'var(--glass-border)',
+            },
+            animation: {
+              'float': 'float 6s ease-in-out infinite',
+              'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            },
+            keyframes: {
+              float: {
+                '0%, 100%': { transform: 'translateY(0)' },
+                '50%': { transform: 'translateY(-20px)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <script type="importmap">
+{
+  "imports": {
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.93.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "recharts": "https://esm.sh/recharts@^2.12.7",
+    "bcryptjs": "https://esm.sh/bcryptjs@2.4.3",
+    "jspdf": "https://esm.sh/jspdf@2.5.1",
+    "@google/genai": "https://esm.sh/@google/genai@^1.39.0"
+  }
+}
+</script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-page text-txt antialiased selection:bg-brand selection:text-white">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
