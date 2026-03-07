@@ -57,28 +57,52 @@ const Landing = () => {
 
     try {
         const cleanInput = loginInput.trim().replace(/["']/g, ''); 
+        console.log("Admin Login Start - Input:", cleanInput);
+
         const { data: user, error: fetchError } = await supabase
           .from('users')
           .select('*')
-          .or(`email.ilike."${cleanInput}",username.ilike."${cleanInput}"`)
+          .or(`email.eq.${cleanInput},username.eq.${cleanInput}`)
           .maybeSingle();
 
-        if (fetchError || !user) throw new Error("Invalid credentials");
+        console.log("Admin DB Lookup:", { user, fetchError });
+
+        if (fetchError || !user) throw new Error("Invalid credentials (no user found)");
+        
+        console.log("Admin User Status:", user.status);
         if (user.status === 'disabled') throw new Error("Account disabled.");
 
         let isValidPassword = false;
-        if (user.password === password.trim()) isValidPassword = true;
-        else { try { isValidPassword = await bcrypt.compare(password.trim(), user.password); } catch {} }
+        console.log("Admin User password from DB:", user.password);
+        if (user.password === password.trim()) {
+            isValidPassword = true;
+            console.log("Password matched plain text");
+        }
+        else { 
+            try { 
+                isValidPassword = await bcrypt.compare(password.trim(), user.password); 
+                console.log("Password matched bcrypt:", isValidPassword);
+            } catch (e) {
+                console.log("Bcrypt compare failed", e);
+            } 
+        }
 
-        if (!isValidPassword) throw new Error("Invalid credentials");
-        if (user.role?.toLowerCase() !== 'admin') throw new Error("Access denied: Not an admin");
+        if (!isValidPassword) throw new Error("Invalid credentials (password wrong)");
+        
+        console.log("Admin User Role:", user.role);
+        // Using includes to allow cases where role might be something like "superadmin, admin" or just "admin".
+        if (!user.role || !user.role.toLowerCase().includes('admin')) {
+             throw new Error(`Access denied: Not an admin. Current role is: ${user.role}`);
+        }
 
         const sessionUser = { ...user, role: 'admin', password: '' };
         localStorage.setItem('qb_user', JSON.stringify(sessionUser));
         localStorage.setItem('qb_session_token', `mock_token_${Date.now()}`);
+        console.log("Admin Login Success!");
         window.dispatchEvent(new Event('auth-change'));
         navigate('/dashboard/admin');
     } catch (err: any) {
+        console.error('Admin Login Error:', err);
         setLoading(false);
         setError(err.message || "Login failed");
     }

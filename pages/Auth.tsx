@@ -31,7 +31,7 @@ const Auth = () => {
       const { data: user, error: fetchError } = await supabase
         .from('users')
         .select('*')
-        .or(`email.eq."${cleanInput}",username.eq."${cleanInput}"`)
+        .or(`email.eq.${cleanInput},username.eq.${cleanInput}`)
         .maybeSingle();
 
       console.log('Login response:', { user, error: fetchError });

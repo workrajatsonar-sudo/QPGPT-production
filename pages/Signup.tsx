@@ -66,7 +66,7 @@ const Signup = () => {
         const { data: existing, error: checkError } = await supabase
             .from('users')
             .select('id')
-            .or(`email.eq."${formData.email}",username.eq."${formData.username}"`)
+            .or(`email.eq.${formData.email},username.eq.${formData.username}`)
             .maybeSingle();
         
         console.log('Duplicate check response:', { existing, error: checkError });
