@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import ConfirmModal from '../components/ConfirmModal';
 import { supabase, getStorageUrl, downloadFile } from '../lib/supabase';
 import { FileRecord } from '../types';
 import { 
@@ -46,6 +47,10 @@ const Approvals = () => {
   const [processing, setProcessing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    show: boolean,
+    type: 'approve' | 'reject' | null
+  }>({ show: false, type: null });
 
   useEffect(() => {
     fetchData();
@@ -55,6 +60,13 @@ const Approvals = () => {
       markAsSeen();
     }
   }, [filterStatus]);
+
+  const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+
+  const showToast = (msg: string, type: 'success' | 'error') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const selectedItem = items.find(i => i.id === selectedId);
 
@@ -107,22 +119,26 @@ const Approvals = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch directly from files table using approval_status
-      const { data: files } = await supabase
+      // Fix: Explicitly declare the foreign key for users (uploaded_by) to prevent PostgREST ambiguity errors
+      const { data: files, error } = await supabase
         .from('files')
-        .select(`*, users(full_name), standards(name), subjects(name)`)
+        .select(`*, author_data:users!uploaded_by(full_name), standards(name), subjects(name)`)
         .eq('approval_status', filterStatus)
         .order('created_at', { ascending: false });
 
+      if (error) {
+         console.error("Fetch Data Error:", error);
+         throw error;
+      }
+
       const mappedFiles: ApprovalItem[] = (files || []).map((f: any) => {
-        // Fallback logic if source column is missing or empty
         const isGenerated = f.source === 'generator' || (f.description && f.description.includes('[AI Generated]'));
         
         return {
           id: f.id,
           title: f.title,
           description: f.description,
-          author: f.users?.full_name || 'Unknown',
+          author: f.author_data?.full_name || f.users?.full_name || 'Unknown',
           date: f.created_at,
           status: f.approval_status,
           standard: f.standards?.name,
@@ -135,22 +151,30 @@ const Approvals = () => {
       });
 
       setItems(mappedFiles);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      if (err?.message?.includes('ambiguous') || err?.code === 'PGRST201') {
+          alert("Database Join Error: Supabase requires disambiguation. The fallback has been applied.");
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAction = async (action: 'approve' | 'reject') => {
+  const handleActionTrigger = (action: 'approve' | 'reject') => {
     if (!selectedId) return;
-    const item = items.find(i => i.id === selectedId);
-    if (!item) return;
-
     if (action === 'reject' && !feedback.trim()) {
       alert("Please provide a reason for rejection.");
       return;
     }
+    setConfirmAction({ show: true, type: action });
+  };
+
+  const handleAction = async () => {
+    const action = confirmAction.type;
+    if (!action || !selectedId) return;
+    const item = items.find(i => i.id === selectedId);
+    if (!item) return;
 
     setProcessing(true);
     try {
@@ -223,6 +247,7 @@ const Approvals = () => {
       setItems(prev => prev.filter(i => i.id !== selectedId));
       setSelectedId(null);
       setFeedback('');
+      setConfirmAction({ show: false, type: null });
 
     } catch (err: any) {
       console.error(err);
@@ -235,6 +260,16 @@ const Approvals = () => {
   return (
     <div className="flex h-full bg-page overflow-hidden transition-colors duration-300">
       
+      <ConfirmModal
+        isOpen={confirmAction.show}
+        onClose={() => setConfirmAction({ show: false, type: null })}
+        onConfirm={handleAction}
+        title={`Confirm ${confirmAction.type === 'approve' ? 'Approval' : 'Rejection'}`}
+        message={`Are you sure you want to ${confirmAction.type} this submission? ${confirmAction.type === 'reject' ? 'The user will be notified of your feedback.' : ''}`}
+        confirmText={confirmAction.type === 'approve' ? 'Approve' : 'Reject'}
+        type={confirmAction.type === 'approve' ? 'success' : 'danger'}
+      />
+
       {/* LEFT PANE: List View */}
       <div className="w-1/3 min-w-[320px] max-w-md border-r border-border bg-card flex flex-col h-full">
         {/* Header */}
@@ -443,7 +478,7 @@ const Approvals = () => {
                     </div>
                     <div className="flex gap-3 pt-6">
                        <button
-                         onClick={() => handleAction('reject')}
+                         onClick={() => handleActionTrigger('reject')}
                          disabled={processing}
                          className="px-6 py-2.5 border border-red-200 text-red-600 hover:bg-red-50 font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
                        >
@@ -451,7 +486,7 @@ const Approvals = () => {
                          Reject
                        </button>
                        <button
-                         onClick={() => handleAction('approve')}
+                         onClick={() => handleActionTrigger('approve')}
                          disabled={processing}
                          className="px-6 py-2.5 bg-green-600 text-white hover:bg-green-700 font-semibold rounded-lg shadow-lg shadow-green-200 transition-all flex items-center gap-2 disabled:opacity-50"
                        >
@@ -474,6 +509,16 @@ const Approvals = () => {
           </div>
         )}
       </div>
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-glass flex items-center gap-3 animate-in slide-in-from-bottom-5 fade-in border border-border ${
+          toast.type === 'success' ? 'bg-card text-txt' : 'bg-red-500 text-white'
+        }`}>
+          {toast.type === 'success' ? <CheckCircle className="w-5 h-5 text-brand" /> : <XCircle className="w-5 h-5" />}
+          <span className="font-medium">{toast.msg}</span>
+        </div>
+      )}
     </div>
   );
 };

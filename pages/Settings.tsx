@@ -10,21 +10,62 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    supabase.from('app_settings').select('*').single().then(({ data }) => {
-      if (data) setSettings(data);
-    });
+    const loadSettings = async () => {
+       const { data, error } = await supabase.from('app_settings').select('*').maybeSingle();
+       if (data) {
+           setSettings(data);
+       } else {
+           // Fallback default state if the database row hasn't been seeded yet
+           setSettings({
+               id: 'default',
+               platform_name: 'QPGPT Admin',
+               theme: 'white',
+               qpgpt_enabled: true,
+               generator_strict_mode: true,
+               allow_text_input: true,
+               allow_pdf_input: true,
+               max_pdf_size_mb: 50,
+               allowed_file_types: ['pdf', 'docx', 'txt'],
+               support_email: 'admin@example.com',
+               maintenance_mode: false,
+               updated_at: new Date().toISOString()
+           });
+       }
+    };
+    loadSettings();
   }, []);
 
   const handleSave = async () => {
     if (!settings) return;
     setSaving(true);
-    await supabase.from('app_settings').update(settings).eq('id', settings.id);
     
-    // Apply theme immediately if changed
-    document.documentElement.setAttribute('data-theme', settings.theme);
-    window.dispatchEvent(new Event('theme-change'));
-    
-    setSaving(false);
+    try {
+      if (settings.id === 'default') {
+          const { id, ...insertPayload } = settings;
+          const { data, error } = await supabase.from('app_settings').insert([insertPayload]).select().single();
+          if (error) throw error;
+          if (data) setSettings(data);
+      } else {
+          const { id, updated_at, ...updatePayload } = settings;
+          const { error } = await supabase
+              .from('app_settings')
+              .update({
+                  ...updatePayload,
+                  updated_at: new Date().toISOString()
+              })
+              .eq('id', id);
+          
+          if (error) throw error;
+      }
+      
+      window.dispatchEvent(new Event('theme-change'));
+
+    } catch (err: any) {
+      console.error('Settings save error:', err);
+      alert('Failed to save settings. Please ensure you are an administrator.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const update = (key: keyof AppSettings, val: any) => setSettings(prev => prev ? ({ ...prev, [key]: val }) : null);
@@ -61,8 +102,8 @@ const Settings = () => {
                   <div>
                      <label className="text-sm font-semibold text-txt mb-3 block">Appearance Theme</label>
                      <div className="grid grid-cols-3 gap-4">
-                        <ThemeCard label="Light" icon={Sun} active={settings.theme === 'white'} onClick={() => update('theme', 'white')} />
-                        <ThemeCard label="Dark" icon={Moon} active={settings.theme === 'black'} onClick={() => update('theme', 'black')} />
+                        <ThemeCard label="Light" icon={Sun} active={settings.theme === 'white' || settings.theme === 'light'} onClick={() => update('theme', 'white')} />
+                        <ThemeCard label="Dark" icon={Moon} active={settings.theme === 'black' || settings.theme === 'dark'} onClick={() => update('theme', 'black')} />
                         <ThemeCard label="Space" icon={Monitor} active={settings.theme === 'space'} onClick={() => update('theme', 'space')} />
                      </div>
                   </div>
@@ -76,28 +117,28 @@ const Settings = () => {
                          <p className="font-bold text-txt">Enable QPGPT</p>
                          <p className="text-xs text-muted">Allow AI chat assistant for users</p>
                       </div>
-                      <input type="checkbox" checked={settings.qpgpt_enabled} onChange={e => update('qpgpt_enabled', e.target.checked)} className="w-5 h-5 accent-brand" />
+                      <input type="checkbox" checked={!!settings.qpgpt_enabled} onChange={e => update('qpgpt_enabled', e.target.checked)} className="w-5 h-5 accent-brand" />
                    </div>
                    <div className="flex items-center justify-between p-4 bg-page rounded-xl border border-border">
                       <div>
                          <p className="font-bold text-txt">Strict Generator Mode</p>
                          <p className="text-xs text-muted">AI sticks strictly to provided context</p>
                       </div>
-                      <input type="checkbox" checked={settings.generator_strict_mode} onChange={e => update('generator_strict_mode', e.target.checked)} className="w-5 h-5 accent-brand" />
+                      <input type="checkbox" checked={!!settings.generator_strict_mode} onChange={e => update('generator_strict_mode', e.target.checked)} className="w-5 h-5 accent-brand" />
                    </div>
                    <div className="flex items-center justify-between p-4 bg-page rounded-xl border border-border">
                       <div>
                          <p className="font-bold text-txt">Allow Text Input</p>
                          <p className="text-xs text-muted">Users can paste text content directly</p>
                       </div>
-                      <input type="checkbox" checked={settings.allow_text_input} onChange={e => update('allow_text_input', e.target.checked)} className="w-5 h-5 accent-brand" />
+                      <input type="checkbox" checked={!!settings.allow_text_input} onChange={e => update('allow_text_input', e.target.checked)} className="w-5 h-5 accent-brand" />
                    </div>
                    <div className="flex items-center justify-between p-4 bg-page rounded-xl border border-border">
                       <div>
                          <p className="font-bold text-txt">Allow File Input (PDF/Word)</p>
                          <p className="text-xs text-muted">Users can upload PDF or Word docs as source</p>
                       </div>
-                      <input type="checkbox" checked={settings.allow_pdf_input} onChange={e => update('allow_pdf_input', e.target.checked)} className="w-5 h-5 accent-brand" />
+                      <input type="checkbox" checked={!!settings.allow_pdf_input} onChange={e => update('allow_pdf_input', e.target.checked)} className="w-5 h-5 accent-brand" />
                    </div>
                 </div>
              )}
@@ -105,7 +146,7 @@ const Settings = () => {
              {/* Placeholder for other tabs if they were fully implemented or needed */}
              {activeTab === 'upload' && <div className="text-muted text-sm">Upload configuration settings (Max size, types) coming soon.</div>}
              {activeTab === 'security' && <div className="text-muted text-sm">Security settings (2FA, Password Policy) coming soon.</div>}
-          </div>
+           </div>
        </div>
     </div>
   );

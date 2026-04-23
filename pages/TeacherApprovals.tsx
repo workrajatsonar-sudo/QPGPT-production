@@ -242,9 +242,16 @@ const TeacherApprovals = () => {
     }
   };
 
+  const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+
+  const showToast = (msg: string, type: 'success' | 'error') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    alert("Copied to clipboard!");
+    showToast("Copied to clipboard!", 'success');
   };
 
   return (
@@ -459,6 +466,16 @@ const TeacherApprovals = () => {
          </div>
       )}
 
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-glass flex items-center gap-3 animate-in slide-in-from-bottom-5 fade-in border border-border ${
+          toast.type === 'success' ? 'bg-card text-txt' : 'bg-red-500 text-white'
+        }`}>
+          {toast.type === 'success' ? <CheckCircle className="w-5 h-5 text-brand" /> : <XCircle className="w-5 h-5" />}
+          <span className="font-medium">{toast.msg}</span>
+        </div>
+      )}
     </div>
   );
 };

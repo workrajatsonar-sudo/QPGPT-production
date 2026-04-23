@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import ConfirmModal from '../components/ConfirmModal';
 import { supabase } from '../lib/supabase';
 import { UserProfile, Role } from '../types';
 import { 
@@ -51,6 +52,7 @@ const Users = () => {
   
   const [processing, setProcessing] = useState(false);
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+  const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
 
   // --- Effects ---
   useEffect(() => {
@@ -148,26 +150,28 @@ const Users = () => {
     }
   };
 
-  const handleDelete = async (user: UserProfile) => {
-    if (user.id === currentUser?.id) return showToast("You cannot delete your own account", 'error');
-    if (!confirm(`Are you sure you want to delete ${user.full_name}? This action cannot be undone.`)) return;
+  const handleDelete = async () => {
+    if (!userToDelete) return;
+    if (userToDelete.id === currentUser?.id) return showToast("You cannot delete your own account", 'error');
 
     try {
-      const { error } = await supabase.from('users').delete().eq('id', user.id);
+      const { error } = await supabase.from('users').delete().eq('id', userToDelete.id);
       if (error) throw error;
 
       await supabase.from('admin_logs').insert({
         admin_id: currentUser?.id,
         action_type: 'reject',
         target_type: 'user',
-        target_id: user.id,
-        details: `Deleted user: ${user.username}`
+        target_id: userToDelete.id,
+        details: `Deleted user: ${userToDelete.username}`
       });
 
       showToast("User deleted successfully", 'success');
-      setUsers(prev => prev.filter(u => u.id !== user.id));
+      fetchUsers();
     } catch (err: any) {
-      showToast("Failed to delete user", 'error');
+      showToast(err.message, 'error');
+    } finally {
+      setUserToDelete(null);
     }
   };
 
@@ -262,39 +266,39 @@ const Users = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-xs font-semibold text-gray-500 uppercase">Total Users</p>
-          <p className="text-2xl font-bold text-gray-900">{users.length}</p>
+        <div className="bg-card p-4 rounded-xl border border-border shadow-glass">
+          <p className="text-xs font-semibold text-muted uppercase">Total Users</p>
+          <p className="text-2xl font-bold text-txt">{users.length}</p>
         </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-xs font-semibold text-gray-500 uppercase">Students</p>
-          <p className="text-2xl font-bold text-blue-600">{users.filter(u => u.role === 'student').length}</p>
+        <div className="bg-card p-4 rounded-xl border border-border shadow-glass">
+          <p className="text-xs font-semibold text-muted uppercase">Students</p>
+          <p className="text-2xl font-bold text-brand">{users.filter(u => u.role === 'student').length}</p>
         </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-xs font-semibold text-gray-500 uppercase">Teachers</p>
-          <p className="text-2xl font-bold text-purple-600">{users.filter(u => u.role === 'teacher').length}</p>
+        <div className="bg-card p-4 rounded-xl border border-border shadow-glass">
+          <p className="text-xs font-semibold text-muted uppercase">Teachers</p>
+          <p className="text-2xl font-bold text-purple-500">{users.filter(u => u.role === 'teacher').length}</p>
         </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-xs font-semibold text-gray-500 uppercase">Admins</p>
-          <p className="text-2xl font-bold text-orange-600">{users.filter(u => u.role === 'admin').length}</p>
+        <div className="bg-card p-4 rounded-xl border border-border shadow-glass">
+          <p className="text-xs font-semibold text-muted uppercase">Admins</p>
+          <p className="text-2xl font-bold text-orange-500">{users.filter(u => u.role === 'admin').length}</p>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-4">
+      <div className="bg-card p-4 rounded-xl border border-border shadow-glass flex flex-col md:flex-row gap-4">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input 
             type="text"
             placeholder="Search by name, email, or username..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-10 pr-4 py-2 bg-input border border-border rounded-lg text-txt outline-none focus:ring-2 focus:ring-brand/20"
           />
         </div>
         <div className="flex gap-2">
            <select 
-             className="px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+             className="px-3 py-2 bg-input border border-border rounded-lg text-sm text-txt outline-none focus:ring-2 focus:ring-brand/20"
              value={roleFilter}
              onChange={(e) => setRoleFilter(e.target.value as any)}
            >
@@ -304,7 +308,7 @@ const Users = () => {
              <option value="admin">Admin</option>
            </select>
            <select 
-             className="px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+             className="px-3 py-2 bg-input border border-border rounded-lg text-sm text-txt outline-none focus:ring-2 focus:ring-brand/20"
              value={statusFilter}
              onChange={(e) => setStatusFilter(e.target.value as any)}
            >
@@ -316,23 +320,23 @@ const Users = () => {
       </div>
 
       {/* Users Table */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden min-h-[400px]">
+      <div className="bg-card rounded-xl border border-border shadow-glass overflow-hidden min-h-[400px]">
         {loading ? (
-           <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+           <div className="flex flex-col items-center justify-center h-64 text-muted">
              <Loader2 className="w-8 h-8 animate-spin mb-2" />
              <p>Loading users...</p>
            </div>
         ) : filteredUsers.length === 0 ? (
-           <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-             <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+           <div className="flex flex-col items-center justify-center h-64 text-muted">
+             <div className="w-16 h-16 bg-page rounded-full flex items-center justify-center mb-4 border border-border">
                <UsersIcon className="w-8 h-8 opacity-20" />
              </div>
-             <p className="text-gray-600 font-medium">No users found</p>
+             <p className="text-txt font-medium">No users found</p>
            </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-medium uppercase tracking-wider">
+              <thead className="bg-page border-b border-border text-muted font-medium uppercase tracking-wider">
                 <tr>
                   <th className="px-6 py-4">User</th>
                   <th className="px-6 py-4">Role</th>
@@ -341,25 +345,25 @@ const Users = () => {
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-border">
                 {filteredUsers.map((user) => (
-                  <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                  <tr key={user.id} className="hover:bg-page transition-colors group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                         <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center text-blue-700 font-bold">
+                         <div className="w-10 h-10 rounded-full bg-brand/10 flex items-center justify-center text-brand font-bold border border-brand/20">
                            {user.full_name?.[0]?.toUpperCase() || 'U'}
                          </div>
                          <div>
-                           <div className="font-semibold text-gray-900">{user.full_name}</div>
-                           <div className="text-xs text-gray-500">@{user.username || 'unknown'}</div>
+                           <div className="font-semibold text-txt">{user.full_name}</div>
+                           <div className="text-xs text-muted">@{user.username || 'unknown'}</div>
                          </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold capitalize border ${
-                        user.role === 'admin' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                        user.role === 'teacher' ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                        'bg-blue-50 text-blue-700 border-blue-200'
+                        user.role === 'admin' ? 'bg-orange-500/10 text-orange-500 border-orange-500/20' :
+                        user.role === 'teacher' ? 'bg-purple-500/10 text-purple-500 border-purple-500/20' :
+                        'bg-brand/10 text-brand border-brand/20'
                       }`}>
                          {user.role === 'admin' ? <Shield className="w-3 h-3" /> : 
                           user.role === 'teacher' ? <GraduationCap className="w-3 h-3" /> : 
@@ -367,9 +371,9 @@ const Users = () => {
                          {user.role}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-gray-500">
+                    <td className="px-6 py-4 text-muted">
                       <div className="flex flex-col gap-0.5">
-                        <span className="text-gray-900">{user.email}</span>
+                        <span className="text-txt">{user.email}</span>
                         <span className="text-xs">
                           {user.grade_year ? `${user.grade_year}` : 'No grade'} 
                           {user.course_stream ? ` • ${user.course_stream}` : ''}
@@ -377,11 +381,11 @@ const Users = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
-                        user.status === 'disabled' ? 'bg-gray-100 text-gray-500' : 'bg-green-50 text-green-700'
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium border ${
+                        user.status === 'disabled' ? 'bg-page text-muted border-border' : 'bg-green-500/10 text-green-500 border-green-500/20'
                       }`}>
-                        {user.status === 'disabled' ? <XCircle className="w-3 h-3" /> : <CheckCircle className="w-3 h-3" />}
-                        {user.status === 'disabled' ? 'Disabled' : 'Active'}
+                         {user.status === 'disabled' ? <XCircle className="w-3 h-3" /> : <CheckCircle className="w-3 h-3" />}
+                         {user.status === 'disabled' ? 'Disabled' : 'Active'}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -409,12 +413,13 @@ const Users = () => {
                               </button>
                               
                               <button 
-                                onClick={() => handleDelete(user)}
-                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                title="Delete User"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                                  onClick={() => setUserToDelete(user)}
+                                  className="p-1 px-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1.5"
+                                  title="Delete User"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  <span className="text-xs font-medium">Delete</span>
+                                </button>
                             </>
                           )}
                        </div>
@@ -429,16 +434,16 @@ const Users = () => {
 
       {/* --- CREATE / EDIT MODAL --- */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+           <div className="bg-card rounded-2xl shadow-glass border border-border w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+             <div className="p-6 border-b border-border flex justify-between items-center bg-page">
                <div>
-                 <h3 className="font-bold text-lg text-gray-900">{modalMode === 'create' ? 'Create New User' : 'Edit User Details'}</h3>
-                 <p className="text-sm text-gray-500">
+                 <h3 className="font-bold text-lg text-txt">{modalMode === 'create' ? 'Create New User' : 'Edit User Details'}</h3>
+                 <p className="text-sm text-muted">
                    {modalMode === 'create' ? 'Add a new user to the system.' : `Updating ${editingUser?.username}`}
                  </p>
                </div>
-               <button onClick={closeModal} className="text-gray-400 hover:text-gray-600"><XCircle className="w-6 h-6" /></button>
+               <button onClick={closeModal} className="text-muted hover:text-txt"><XCircle className="w-6 h-6" /></button>
              </div>
 
              <form onSubmit={handleSave} className="p-6">
@@ -576,13 +581,25 @@ const Users = () => {
 
       {/* Toast Notification */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-in slide-in-from-bottom-5 fade-in ${
-          toast.type === 'success' ? 'bg-gray-900 text-white' : 'bg-red-600 text-white'
+        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-glass flex items-center gap-3 animate-in slide-in-from-bottom-5 fade-in border border-border ${
+          toast.type === 'success' ? 'bg-card text-txt' : 'bg-red-500 text-white'
         }`}>
-          {toast.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+          {toast.type === 'success' ? <CheckCircle className="w-5 h-5 text-brand" /> : <XCircle className="w-5 h-5" />}
           <span className="font-medium">{toast.msg}</span>
         </div>
       )}
+
+      {/* Custom Confirmation Modal */}
+      <ConfirmModal 
+        isOpen={!!userToDelete}
+        onClose={() => setUserToDelete(null)}
+        onConfirm={handleDelete}
+        type="danger"
+        title="Confirm User Deletion"
+        message={`Are you sure you want to delete ${userToDelete?.full_name}? This will permanently remove their access to the platform and cannot be undone.`}
+        confirmText="Yes, Delete User"
+        cancelText="Cancel"
+      />
 
     </div>
   );

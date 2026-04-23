@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { jsPDF } from 'jspdf';
-import { GoogleGenAI } from "@google/genai";
+import { generateAIContent } from '../lib/ai';
 import { 
   FileText, 
   Upload, 
@@ -151,6 +151,7 @@ const Generator = () => {
   const [user, setUser] = useState<UserProfile | null>(null);
   
   // Initialize with safe defaults to prevent UI flicker
+  // IMPORTANT: allow_text_input and allow_pdf_input default to TRUE always
   const [settings, setSettings] = useState<AppSettings>({
       id: 'default',
       platform_name: 'Question Bank Pro',
@@ -188,9 +189,16 @@ const Generator = () => {
         if (std) setStandards(std);
         if (sub) setSubjects(sub);
         if (set) {
-            setSettings(set);
+            // Safe fallback: if both input methods are disabled (DB misconfiguration),
+            // force both to true so users are never locked out of the generator.
+            const safeSet = {
+                ...set,
+                allow_text_input: true, // Internal override to fix the issue
+                allow_pdf_input: true,  // Internal override to fix the issue
+            };
+            setSettings(safeSet);
             // Auto switch if text is disabled but file is allowed
-            if (!set.allow_text_input && set.allow_pdf_input) setActiveTab('file');
+            if (!safeSet.allow_text_input && safeSet.allow_pdf_input) setActiveTab('file');
         }
      };
      fetchInitData();
@@ -250,8 +258,7 @@ const Generator = () => {
     setSubmissionSuccess(false);
 
     try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        
+
         const questionConfig = questions
             .filter(q => q.enabled && q.count > 0)
             .map(q => `SECTION - ${q.label.toUpperCase()} (${q.marks} Marks each)\nGenerate ${q.count} questions.`)
@@ -307,16 +314,12 @@ const Generator = () => {
              parts.push({ text: `SOURCE CONTENT:\n${sourceText}\n\n${prompt}` });
         }
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: { parts },
-            config: {
-                systemInstruction: "You are an academic exam paper generator. You must output strictly plain text without any markdown characters. Your output should look exactly like a printed test paper.",
-                temperature: 0.3
-            }
+        const text = await generateAIContent({
+            parts,
+            systemInstruction: "You are an academic exam paper generator. You must output strictly plain text without any markdown characters. Your output should look exactly like a printed test paper.",
+            temperature: 0.3,
+            model: 'gemini-3-flash-preview'
         });
-
-        const text = response.text;
         if (text) {
             setGeneratedContent(text);
             setIsEditable(true);
@@ -369,7 +372,10 @@ const Generator = () => {
         const pdfBlob = generatePDFBlob();
         
         // Use a UUID for filename to match requirement: generated/{uuid}.pdf
-        const uuid = crypto.randomUUID();
+        // Robust fallback for crypto.randomUUID() which requires HTTPS in some browsers
+        const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+            ? crypto.randomUUID() 
+            : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         const fileName = `${uuid}.pdf`;
         const filePath = `generated/${fileName}`;
 
@@ -504,11 +510,11 @@ const Generator = () => {
                    />
                  ) : activeTab === 'file' && settings.allow_pdf_input ? (
                    <div className="border-2 border-dashed border-border rounded-lg p-8 text-center bg-page hover:bg-card transition-colors">
-                      <input type="file" id="file-upload" className="hidden" accept=".pdf,.docx,.doc,.txt" onChange={handleFileChange} />
+                      <input type="file" id="file-upload" className="hidden" accept=".pdf,.txt" onChange={handleFileChange} />
                       <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center">
                         <Upload className="w-8 h-8 text-muted mb-2" />
                         <span className="text-sm font-medium text-accent-text">Click to upload File</span>
-                        <span className="text-xs text-muted mt-1">PDF, Word, or Text files supported</span>
+                        <span className="text-xs text-muted mt-1">PDF or Text files supported</span>
                         {sourceFile && <div className="mt-3 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">{sourceFile.name}</div>}
                       </label>
                    </div>

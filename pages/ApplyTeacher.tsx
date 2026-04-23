@@ -93,7 +93,9 @@ const ApplyTeacher = () => {
     setError(null);
 
     // 1. Generate UUID for the application and folder
-    const applicationId = crypto.randomUUID();
+    const applicationId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+        ? crypto.randomUUID() 
+        : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     try {
       // 2. Upload Files
@@ -115,6 +117,19 @@ const ApplyTeacher = () => {
         });
 
       if (insertError) throw insertError;
+
+      // 4. Notify Admins
+      const { data: admins } = await supabase.from('users').select('id').eq('role', 'admin');
+      if (admins && admins.length > 0) {
+          const notifications = admins.map(admin => ({
+              user_id: admin.id,
+              title: 'New Teacher Request',
+              message: `${formData.full_name} has applied as a verified teacher for ${formData.subject_specialization}.`,
+              type: 'info',
+              link: '/teacher-approvals'
+          }));
+          await supabase.from('notifications').insert(notifications);
+      }
 
       setSuccess(true);
 

@@ -197,6 +197,21 @@ const UploadPage = () => {
         throw dbError;
       }
 
+      // 4. Notify Admins (if not uploaded by an Admin)
+      if (!isAdmin) {
+          const { data: admins } = await supabase.from('users').select('id').eq('role', 'admin');
+          if (admins && admins.length > 0) {
+              const notifications = admins.map(admin => ({
+                  user_id: admin.id,
+                  title: 'New Content Approval',
+                  message: `${user.full_name} uploaded "${formData.title}" for ${formData.type}.`,
+                  type: 'info',
+                  link: '/approvals'
+              }));
+              await supabase.from('notifications').insert(notifications);
+          }
+      }
+
       // Success
       const successMessage = isAdmin 
         ? "File uploaded and published successfully!" 

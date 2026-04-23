@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { GoogleGenAI } from "@google/genai";
+import { generateAIContent } from '../lib/ai';
 import { 
   Gamepad2, 
   Upload, 
@@ -23,7 +23,6 @@ import {
   AlignLeft,
   Share2
 } from 'lucide-react';
-
 const SYSTEM_INSTRUCTION = `You are an educational AI engine that generates interactive quiz games for students.
 
 Your role is to create a live quiz session strictly based on the provided input content.
@@ -107,36 +106,36 @@ const BADGES: Record<BadgeType, BadgeConfig> = {
   rookie: {
     id: 'rookie',
     title: 'Rookie Scout',
-    description: 'A good start! Keep practicing to unlock your potential.',
-    gradient: 'from-orange-100 to-orange-200',
-    borderColor: 'border-orange-300',
-    textColor: 'text-orange-900',
+    description: 'A solid foundation! Keep practicing to unlock your true potential.',
+    gradient: 'from-orange-500 via-amber-500 to-orange-600',
+    borderColor: 'border-orange-400/50',
+    textColor: 'text-white',
     icon: FileText
   },
   apprentice: {
     id: 'apprentice',
     title: 'Rising Star',
-    description: 'Solid effort! You are on your way to mastery.',
-    gradient: 'from-blue-100 to-indigo-200',
-    borderColor: 'border-indigo-300',
-    textColor: 'text-indigo-900',
+    description: 'Great effort! Your knowledge is quickly expanding.',
+    gradient: 'from-blue-500 via-indigo-500 to-blue-600',
+    borderColor: 'border-indigo-400/50',
+    textColor: 'text-white',
     icon: BrainCircuit
   },
   elite: {
     id: 'elite',
     title: 'Elite Scholar',
-    description: 'Outstanding performance! You have a deep understanding.',
-    gradient: 'from-yellow-100 to-amber-200',
-    borderColor: 'border-amber-300',
-    textColor: 'text-amber-900',
+    description: 'Outstanding performance! You have a profound understanding of the material.',
+    gradient: 'from-amber-400 via-yellow-500 to-orange-500',
+    borderColor: 'border-yellow-300/50',
+    textColor: 'text-white',
     icon: Trophy
   },
   lightning: {
     id: 'lightning',
     title: 'Lightning Grandmaster',
-    description: 'Perfect Score & Blazing Speed! Truly legendary status.',
-    gradient: 'from-purple-500 via-pink-500 to-red-500',
-    borderColor: 'border-purple-400',
+    description: 'Perfect Score & Blazing Speed! A truly legendary flawless victory.',
+    gradient: 'from-[#FF0080] via-[#7928CA] to-[#FF0080]',
+    borderColor: 'border-[#7928CA]/50',
     textColor: 'text-white',
     icon: Zap
   }
@@ -250,7 +249,6 @@ const QuizGame = () => {
     setError(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const parts: any[] = [];
 
       if (activeTab === 'file' && sourceFile) {
@@ -266,17 +264,14 @@ const QuizGame = () => {
       const userPrompt = `SOURCE CONTENT:\n${activeTab === 'text' ? sourceText : '(See attached file)'}`;
       parts.push({ text: userPrompt });
 
-      const response = await ai.models.generateContent({
+      const text = await generateAIContent({
         model: 'gemini-3-flash-preview',
-        contents: { parts },
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: 'application/json',
-          temperature: 0.4
-        }
+        parts,
+        systemInstruction: SYSTEM_INSTRUCTION,
+        responseMimeType: 'application/json',
+        temperature: 0.4
       });
 
-      const text = response.text;
       if (!text) throw new Error("Failed to generate quiz data.");
 
       const data: QuizData = JSON.parse(text);
@@ -408,66 +403,69 @@ const QuizGame = () => {
     const BadgeIcon = badge.icon;
 
     return (
-      <div className="max-w-4xl mx-auto p-6 space-y-8 animate-in zoom-in-95 duration-500 font-sans">
+      <div className="max-w-4xl mx-auto p-4 md:p-8 space-y-8 animate-in zoom-in-95 duration-700 font-sans min-h-[80vh] flex flex-col justify-center">
          
-         {/* Badge & Score Card */}
-         <div className={`relative overflow-hidden rounded-3xl bg-gradient-to-br ${badge.gradient} border-2 ${badge.borderColor} shadow-xl text-center p-10`}>
+         {/* Premium Badge & Score Card */}
+         <div className={`relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br ${badge.gradient} shadow-2xl text-center p-8 md:p-14 group`}>
+             {/* Animated Glow Effects behind the card content */}
+             <div className="absolute inset-0 bg-black/10 mix-blend-overlay"></div>
+             <div className="absolute -top-24 -left-24 w-72 h-72 bg-white/20 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-1000 ease-out"></div>
+             <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-white/20 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-1000 ease-out"></div>
+             
              <div className="relative z-10 flex flex-col items-center">
-                 <div className={`w-32 h-32 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center mb-6 shadow-lg border-4 ${badge.borderColor} animate-bounce`}>
-                    <BadgeIcon className={`w-16 h-16 ${badge.textColor}`} />
+                 {/* Badge Icon with rotating ring effect */}
+                 <div className="relative w-40 h-40 mb-8 flex items-center justify-center">
+                     <div className={`absolute inset-0 rounded-full border-4 border-dashed border-white/60 animate-[spin_10s_linear_infinite]`}></div>
+                     <div className={`absolute inset-2 rounded-full border-4 ${badge.borderColor} backdrop-blur-md bg-white/10 shadow-[0_0_40px_rgba(255,255,255,0.3)] flex items-center justify-center transition-transform hover:scale-110 duration-500`}>
+                        <BadgeIcon className={`w-20 h-20 ${badge.textColor} drop-shadow-md`} />
+                     </div>
                  </div>
                  
-                 <h1 className={`text-4xl md:text-5xl font-extrabold ${badge.textColor} mb-2 tracking-tight`}>{badge.title}</h1>
-                 <p className={`text-lg ${badge.textColor} opacity-90 max-w-lg mx-auto font-medium`}>{badge.description}</p>
+                 <h1 className={`text-4xl md:text-6xl font-black ${badge.textColor} mb-4 tracking-tight drop-shadow-lg`}>{badge.title}</h1>
+                 <p className={`text-lg md:text-xl text-white/90 max-w-xl mx-auto font-medium leading-relaxed drop-shadow-md`}>{badge.description}</p>
                  
-                 <div className="grid grid-cols-2 gap-8 mt-8 w-full max-w-sm">
-                    <div className="bg-white/20 backdrop-blur-md rounded-2xl p-4 border border-white/30 shadow-inner">
-                       <p className={`text-xs uppercase tracking-widest font-bold ${badge.textColor} opacity-80`}>Score</p>
-                       <p className={`text-3xl font-black ${badge.textColor}`}>{score}/10</p>
+                 <div className="grid grid-cols-2 gap-4 md:gap-8 mt-10 w-full max-w-md">
+                    <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-6 border border-white/20 shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-1 transition-transform duration-300">
+                       <p className={`text-xs md:text-sm uppercase tracking-[0.2em] font-bold text-white/80 mb-2`}>Final Score</p>
+                       <p className={`text-4xl md:text-5xl font-black ${badge.textColor} drop-shadow-sm`}>{score}<span className="text-2xl text-white/60">/10</span></p>
                     </div>
-                    <div className="bg-white/20 backdrop-blur-md rounded-2xl p-4 border border-white/30 shadow-inner">
-                       <p className={`text-xs uppercase tracking-widest font-bold ${badge.textColor} opacity-80`}>Time</p>
-                       <p className={`text-3xl font-black ${badge.textColor}`}>{timeTaken}</p>
+                    <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-6 border border-white/20 shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-1 transition-transform duration-300">
+                       <p className={`text-xs md:text-sm uppercase tracking-[0.2em] font-bold text-white/80 mb-2`}>Time Taken</p>
+                       <p className={`text-4xl md:text-5xl font-black ${badge.textColor} drop-shadow-sm flex items-end justify-center h-full pb-1`} style={{ fontSize: '2.5rem' }}>{timeTaken}</p>
                     </div>
                  </div>
 
                  {/* Social Sharing */}
-                 <div className="mt-8 flex flex-col items-center gap-4 w-full animate-in slide-in-from-bottom-4 delay-200">
-                    <p className={`text-xs font-bold uppercase tracking-wide ${badge.textColor} opacity-80`}>Share Your Achievement</p>
+                 <div className="mt-12 flex flex-col items-center gap-6 w-full animate-in slide-in-from-bottom-8 duration-700 delay-300">
+                    <p className={`text-sm font-bold uppercase tracking-widest text-white/80 bg-black/20 px-4 py-1.5 rounded-full shadow-inner`}>Share Your Glory</p>
                     
-                    <div className="flex flex-wrap justify-center gap-3">
+                    <div className="flex flex-wrap justify-center gap-4">
                          {/* Native Share / Primary Share */}
                         <button 
                           onClick={() => handleShare('native', badge)}
-                          className="px-6 py-2.5 bg-white/30 backdrop-blur-md border border-white/50 rounded-full text-white font-bold shadow-lg hover:scale-105 transition-all flex items-center gap-2 hover:bg-white/40"
+                          className="px-8 py-4 bg-white text-gray-900 rounded-full font-black shadow-[0_10px_40px_rgba(0,0,0,0.2)] hover:scale-105 hover:shadow-[0_15px_50px_rgba(255,255,255,0.3)] transition-all duration-300 flex items-center gap-3 text-lg"
                         >
-                            <Share2 className="w-5 h-5" /> Share Result
+                            <Share2 className="w-6 h-6 text-brand" /> Share Result
                         </button>
                     </div>
 
-                    <div className="flex gap-2 opacity-80 hover:opacity-100 transition-opacity">
-                        <button onClick={() => handleShare('linkedin', badge)} className="p-2 bg-white/90 text-[#0077b5] rounded-full hover:scale-110 transition-transform shadow-sm" title="Share on LinkedIn"><Linkedin className="w-5 h-5" /></button>
-                        <button onClick={() => handleShare('twitter', badge)} className="p-2 bg-white/90 text-[#1DA1F2] rounded-full hover:scale-110 transition-transform shadow-sm" title="Share on Twitter"><Twitter className="w-5 h-5" /></button>
-                        <button onClick={() => handleShare('facebook', badge)} className="p-2 bg-white/90 text-[#4267B2] rounded-full hover:scale-110 transition-transform shadow-sm" title="Share on Facebook"><Facebook className="w-5 h-5" /></button>
-                        <button onClick={() => handleShare('copy', badge)} className="p-2 bg-white/90 text-gray-700 rounded-full hover:scale-110 transition-transform shadow-sm" title="Copy Text"><Copy className="w-5 h-5" /></button>
+                    <div className="flex gap-4 mt-2">
+                        <button onClick={() => handleShare('linkedin', badge)} className="p-3 bg-white/20 hover:bg-white text-white hover:text-[#0077b5] backdrop-blur-md border border-white/30 rounded-full transition-all duration-300 shadow-lg focus:outline-none focus:ring-2 focus:ring-white" title="Share on LinkedIn"><Linkedin className="w-5 h-5" /></button>
+                        <button onClick={() => handleShare('twitter', badge)} className="p-3 bg-white/20 hover:bg-white text-white hover:text-[#1DA1F2] backdrop-blur-md border border-white/30 rounded-full transition-all duration-300 shadow-lg focus:outline-none focus:ring-2 focus:ring-white" title="Share on Twitter"><Twitter className="w-5 h-5" /></button>
+                        <button onClick={() => handleShare('facebook', badge)} className="p-3 bg-white/20 hover:bg-white text-white hover:text-[#4267B2] backdrop-blur-md border border-white/30 rounded-full transition-all duration-300 shadow-lg focus:outline-none focus:ring-2 focus:ring-white" title="Share on Facebook"><Facebook className="w-5 h-5" /></button>
+                        <button onClick={() => handleShare('copy', badge)} className="p-3 bg-white/20 hover:bg-white text-white hover:text-gray-900 backdrop-blur-md border border-white/30 rounded-full transition-all duration-300 shadow-lg focus:outline-none focus:ring-2 focus:ring-white" title="Copy Text"><Copy className="w-5 h-5" /></button>
                     </div>
                  </div>
-             </div>
-             
-             {/* Background Decoration */}
-             <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
-                 <div className="absolute top-10 left-10 w-32 h-32 bg-white rounded-full blur-3xl"></div>
-                 <div className="absolute bottom-10 right-10 w-40 h-40 bg-white rounded-full blur-3xl"></div>
              </div>
          </div>
 
          {/* Actions */}
-         <div className="flex justify-center">
+         <div className="flex justify-center pt-8">
              <button 
                onClick={handleRestart}
-               className="px-8 py-3 bg-card border border-border text-txt rounded-full font-bold shadow-sm hover:bg-muted/10 hover:scale-105 transition-all flex items-center gap-2"
+               className="px-10 py-4 bg-card border-2 border-border text-txt rounded-full font-bold shadow-lg hover:bg-brand/5 hover:border-brand/40 hover:text-brand hover:-translate-y-1 transition-all duration-300 flex items-center gap-3 text-lg"
              >
-                <RotateCcw className="w-5 h-5" /> Play Again
+                <RotateCcw className="w-6 h-6" /> Play Again
              </button>
          </div>
 

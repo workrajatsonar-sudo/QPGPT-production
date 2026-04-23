@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { 
   GraduationCap, 
@@ -9,7 +9,8 @@ import {
   Loader2, 
   Zap, 
   AlertCircle,
-  Check
+  Check,
+  ChevronLeft
 } from 'lucide-react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import bcrypt from 'bcryptjs';
@@ -39,6 +40,16 @@ const Signup = () => {
     subjects_of_interest: '', // Comma separated for input
     exam_type: '',
   });
+
+  // Handle OAuth redirect - pre-fill email (must be after formData state)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const oauthEmail = params.get('email');
+    const isOAuth = params.get('oauth') === 'true';
+    if (oauthEmail && isOAuth) {
+      setFormData(prev => ({ ...prev, email: oauthEmail }));
+    }
+  }, [location.search]);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -276,6 +287,17 @@ const Signup = () => {
       {/* Background Elements */}
       <div className={`absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full blur-[150px] pointer-events-none transition-colors duration-700 bg-brand/10`} />
       <div className={`absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full blur-[150px] pointer-events-none transition-colors duration-700 bg-purple-500/10`} />
+
+      {/* Back to Home Button */}
+      <div className="absolute top-8 left-8 z-50">
+        <Link 
+          to="/" 
+          className="flex items-center gap-2 px-4 py-2 bg-card/50 backdrop-blur-md border border-border rounded-full text-sm font-semibold text-txt hover:bg-card hover:scale-105 transition-all shadow-glass group"
+        >
+          <ChevronLeft className="w-4 h-4 text-muted group-hover:text-brand transition-colors" />
+          Go back to home
+        </Link>
+      </div>
 
       <div className={`w-full relative z-10 transition-all duration-500 ${isRoleSelection ? 'max-w-4xl' : 'max-w-xl'}`}>
         <div className="bg-card border border-glass rounded-3xl shadow-glass overflow-hidden backdrop-blur-xl">

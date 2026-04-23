@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Standard, Subject, Medium, Chapter } from '../types';
+import ConfirmModal from '../components/ConfirmModal';
 import { 
   Plus, 
   Trash2, 
@@ -34,6 +35,7 @@ const Categories = () => {
   const [data, setData] = useState<CategoryData[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -44,6 +46,14 @@ const Categories = () => {
     subject_id: '' 
   });
   const [processing, setProcessing] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    show: boolean, 
+    type: 'single' | 'bulk', 
+    id?: string 
+  }>({
+    show: false,
+    type: 'single'
+  });
 
   // Metadata for Selectors
   const [standardsList, setStandardsList] = useState<Standard[]>([]);
@@ -56,13 +66,12 @@ const Categories = () => {
 
   useEffect(() => {
     fetchTabData();
-    // Fetch metadata needed for dropdowns
+    setSelectedIds([]); // Reset selection on tab change
     if (activeTab === 'subjects' || activeTab === 'chapters') {
       fetchStandards();
     }
   }, [activeTab]);
 
-  // When standard changes in form, fetch related subjects (for chapters tab)
   useEffect(() => {
     if (activeTab === 'chapters' && formData.standard_id) {
       fetchSubjects(formData.standard_id);
@@ -88,18 +97,10 @@ const Categories = () => {
     try {
       let query;
       switch (activeTab) {
-        case 'standards':
-          query = supabase.from('standards').select('*').order('name');
-          break;
-        case 'mediums':
-          query = supabase.from('mediums').select('*').order('name');
-          break;
-        case 'subjects':
-          query = supabase.from('subjects').select('*, standards(name)').order('name');
-          break;
-        case 'chapters':
-          query = supabase.from('chapters').select('*, standards(name), subjects(name)').order('name');
-          break;
+        case 'standards': query = supabase.from('standards').select('*').order('name'); break;
+        case 'mediums': query = supabase.from('mediums').select('*').order('name'); break;
+        case 'subjects': query = supabase.from('subjects').select('*, standards(name)').order('name'); break;
+        case 'chapters': query = supabase.from('chapters').select('*, standards(name), subjects(name)').order('name'); break;
       }
       
       const { data, error } = await query!;
@@ -114,51 +115,81 @@ const Categories = () => {
 
   // --- Actions ---
 
+  const handleBulkDeleteTrigger = () => {
+    if (!selectedIds.length) {
+      showToast("Please select at least one item", 'error');
+      return;
+    }
+    setDeleteConfirm({ show: true, type: 'bulk' });
+  };
+
+  const handleBulkDelete = async () => {
+    setProcessing(true);
+    let successCount = 0;
+    let failCount = 0;
+    let lastError = "";
+
+    try {
+      // We'll process them one by one to ensure we catch specific constraint failures
+      for (const id of selectedIds) {
+        const { error } = await supabase.from(activeTab).delete().eq('id', id);
+        if (error) {
+          console.error(`[Categories] Failed to delete ${id}:`, error);
+          failCount++;
+          lastError = error.details || error.message;
+        } else {
+          successCount++;
+        }
+      }
+
+      if (successCount > 0) {
+        showToast(`Successfully deleted ${successCount} items`, 'success');
+      }
+      
+      if (failCount > 0) {
+        const msg = lastError.includes('is still referenced')
+          ? `${failCount} items couldn't be deleted because they are in use by files/papers.`
+          : `Failed to delete ${failCount} items. Error: ${lastError}`;
+        showToast(msg, 'error');
+      }
+
+      setSelectedIds([]);
+      fetchTabData();
+    } catch (err: any) {
+      console.error('[Categories] Critical Bulk delete catch:', err);
+      showToast("A critical error occurred during bulk deletion.", 'error');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filteredData.length) setSelectedIds([]);
+    else setSelectedIds(filteredData.map(i => i.id));
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) return showToast("Name is required", 'error');
-    if ((activeTab === 'subjects' || activeTab === 'chapters') && !formData.standard_id) return showToast("Standard is required", 'error');
-    if (activeTab === 'chapters' && !formData.subject_id) return showToast("Subject is required", 'error');
-
     setProcessing(true);
     try {
-      const userStr = localStorage.getItem('qb_user');
-      const adminId = userStr ? JSON.parse(userStr).id : null;
-
       const payload: any = { name: formData.name };
       if (activeTab === 'subjects' || activeTab === 'chapters') payload.standard_id = formData.standard_id;
       if (activeTab === 'chapters') payload.subject_id = formData.subject_id;
 
-      let result;
-      let actionType = '';
-
-      if (editingItem) {
-        // Update
-        result = await supabase.from(activeTab).update(payload).eq('id', editingItem.id);
-        actionType = 'update';
-      } else {
-        // Create
-        result = await supabase.from(activeTab).insert(payload);
-        actionType = 'create';
-      }
+      let result = editingItem 
+        ? await supabase.from(activeTab).update(payload).eq('id', editingItem.id)
+        : await supabase.from(activeTab).insert(payload);
 
       if (result.error) throw result.error;
-
-      // Log Action
-      if (adminId) {
-        await supabase.from('admin_logs').insert({
-          admin_id: adminId,
-          action_type: editingItem ? 'modify' : 'create',
-          target_type: activeTab.slice(0, -1), // standard, subject etc.
-          target_id: editingItem ? editingItem.id : 'new', // UUID not avail for new insert without select return
-          details: `Category: ${activeTab} | Name: ${formData.name}`
-        });
-      }
 
       showToast(`${activeTab.slice(0, -1)} saved successfully!`, 'success');
       closeModal();
       fetchTabData();
-
     } catch (err: any) {
       showToast(err.message, 'error');
     } finally {
@@ -166,46 +197,39 @@ const Categories = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure? This might affect linked content.")) return;
-    
-    try {
-      const userStr = localStorage.getItem('qb_user');
-      const adminId = userStr ? JSON.parse(userStr).id : null;
+  const handleDeleteTrigger = (id: string) => {
+    setDeleteConfirm({ show: true, type: 'single', id });
+  };
 
+  const handleDelete = async () => {
+    const id = deleteConfirm.id;
+    if (deleteConfirm.type === 'single' && !id) return;
+    
+    if (deleteConfirm.type === 'bulk') {
+      await handleBulkDelete();
+      return;
+    }
+
+    try {
       const { error } = await supabase.from(activeTab).delete().eq('id', id);
       if (error) throw error;
-
-      // Log
-      if (adminId) {
-        await supabase.from('admin_logs').insert({
-          admin_id: adminId,
-          action_type: 'reject', // Using reject as delete metaphor based on existing types or extend types
-          target_type: activeTab.slice(0, -1),
-          target_id: id,
-          details: `Deleted from ${activeTab}`
-        });
-      }
-
+      
       showToast("Item deleted successfully", 'success');
       fetchTabData();
     } catch (err: any) {
-      showToast("Delete failed. Item might be in use.", 'error');
+      console.error('[Categories] Delete Error:', err);
+      const msg = err.details?.includes('is still referenced')
+        ? "Cannot delete: This item has files or subjects linked to it."
+        : `Delete failed: ${err.message || 'Check database permissions'}`;
+      showToast(msg, 'error');
     }
   };
 
   const openModal = (item?: CategoryData) => {
     if (item) {
       setEditingItem(item);
-      setFormData({
-        name: item.name,
-        standard_id: item.standard_id || '',
-        subject_id: item.subject_id || ''
-      });
-      // If editing chapter, fetch subjects for the existing standard
-      if (activeTab === 'chapters' && item.standard_id) {
-        fetchSubjects(item.standard_id);
-      }
+      setFormData({ name: item.name, standard_id: item.standard_id || '', subject_id: item.subject_id || '' });
+      if (activeTab === 'chapters' && item.standard_id) fetchSubjects(item.standard_id);
     } else {
       setEditingItem(null);
       setFormData({ name: '', standard_id: '', subject_id: '' });
@@ -224,14 +248,11 @@ const Categories = () => {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // --- Filtering ---
   const filteredData = data.filter(item => 
     item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.standards?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.subjects?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  // --- Render Helpers ---
 
   const getTabLabel = (tab: Tab) => {
     switch(tab) {
@@ -248,19 +269,30 @@ const Categories = () => {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Category Management</h1>
-          <p className="text-gray-500 text-sm">Define the educational hierarchy for the platform.</p>
+          <h1 className="text-2xl font-bold text-txt">Category Management</h1>
+          <p className="text-muted text-sm">Define the educational hierarchy for the platform.</p>
         </div>
-        <button 
-          onClick={() => openModal()}
-          className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-all flex items-center gap-2 shadow-sm"
-        >
-          <Plus className="w-5 h-5" /> Add {activeTab.slice(0, -1)}
-        </button>
+        <div className="flex items-center gap-3">
+          {selectedIds.length > 0 && (
+            <button 
+              onClick={handleBulkDeleteTrigger}
+              disabled={processing}
+              className="bg-red-500/10 text-red-500 border border-red-500/20 px-4 py-2.5 rounded-lg font-bold text-sm hover:bg-red-500 hover:text-white transition-all flex items-center gap-2 animate-in zoom-in"
+            >
+              <Trash2 className="w-4 h-4" /> Delete selected ({selectedIds.length})
+            </button>
+          )}
+          <button 
+            onClick={() => openModal()}
+            className="bg-brand text-inv px-5 py-2.5 rounded-lg font-medium hover:bg-brand-hover transition-all flex items-center gap-2 shadow-glass"
+          >
+            <Plus className="w-5 h-5" /> Add {activeTab.slice(0, -1)}
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
+      <div className="border-b border-border">
         <nav className="flex space-x-8 overflow-x-auto" aria-label="Tabs">
           {(['standards', 'subjects', 'mediums', 'chapters'] as Tab[]).map((tab) => {
             const isActive = activeTab === tab;
@@ -275,10 +307,10 @@ const Categories = () => {
                 onClick={() => { setActiveTab(tab); setSearchQuery(''); }}
                 className={`
                   flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap transition-colors
-                  ${isActive ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}
+                  ${isActive ? 'border-brand text-brand' : 'border-transparent text-muted hover:text-txt hover:border-border'}
                 `}
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-blue-500' : 'text-gray-400'}`} />
+                <Icon className={`w-4 h-4 ${isActive ? 'text-brand' : 'text-muted'}`} />
                 {getTabLabel(tab)}
               </button>
             );
@@ -287,68 +319,83 @@ const Categories = () => {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+      <div className="flex items-center gap-4 bg-card p-4 rounded-xl border border-border shadow-glass">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input 
             type="text"
             placeholder={`Search ${activeTab}...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full pl-10 pr-4 py-2 text-sm bg-input border border-border rounded-lg text-txt outline-none focus:ring-2 focus:ring-brand/20"
           />
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-muted">
           <Filter className="w-4 h-4" />
           <span>{filteredData.length} items</span>
         </div>
       </div>
 
-      {/* Data Table */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden min-h-[400px]">
+      {/* Table Area */}
+      <div className="bg-card rounded-xl border border-border shadow-glass overflow-hidden min-h-[400px]">
         {loading ? (
-          <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+          <div className="flex flex-col items-center justify-center h-64 text-muted">
             <Loader2 className="w-8 h-8 animate-spin mb-2" />
             <p className="text-sm">Loading categories...</p>
           </div>
         ) : filteredData.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-            <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+          <div className="flex flex-col items-center justify-center h-64 text-muted">
+            <div className="w-16 h-16 bg-page rounded-full flex items-center justify-center mb-4 border border-border">
               <Layers className="w-8 h-8 opacity-20" />
             </div>
-            <p className="text-gray-600 font-medium">No items found</p>
-            <p className="text-xs mt-1">Add a new item to get started</p>
+            <p className="text-txt font-medium">No items found</p>
+            <p className="text-xs mt-1 text-muted">Add a new item to get started</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-medium">
+              <thead className="bg-page border-b border-border text-muted font-medium">
                 <tr>
+                  <th className="px-6 py-4 w-12 text-center">
+                    <input 
+                      type="checkbox" 
+                      onChange={toggleSelectAll}
+                      checked={selectedIds.length === filteredData.length && filteredData.length > 0}
+                      className="rounded border-border text-brand focus:ring-brand bg-input"
+                    />
+                  </th>
                   <th className="px-6 py-4 w-16">#</th>
                   <th className="px-6 py-4">Name</th>
-                  {/* Dynamic Columns based on Tab */}
                   {(activeTab === 'subjects' || activeTab === 'chapters') && <th className="px-6 py-4">Standard</th>}
                   {activeTab === 'chapters' && <th className="px-6 py-4">Subject</th>}
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-border">
                 {filteredData.map((item, idx) => (
-                  <tr key={item.id} className="hover:bg-gray-50 group transition-colors">
-                    <td className="px-6 py-4 text-gray-400 font-mono text-xs">{idx + 1}</td>
-                    <td className="px-6 py-4 font-medium text-gray-900">{item.name}</td>
+                  <tr key={item.id} className={`hover:bg-page transition-colors group ${selectedIds.includes(item.id) ? 'bg-brand/5' : ''}`}>
+                    <td className="px-6 py-4 text-center">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.includes(item.id)}
+                        onChange={() => toggleSelect(item.id)}
+                        className="rounded border-border text-brand focus:ring-brand bg-input"
+                      />
+                    </td>
+                    <td className="px-6 py-4 text-muted font-mono text-xs">{idx + 1}</td>
+                    <td className="px-6 py-4 font-medium text-txt">{item.name}</td>
                     
                     {(activeTab === 'subjects' || activeTab === 'chapters') && (
-                      <td className="px-6 py-4 text-gray-600">
-                        <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-xs font-medium border border-blue-100">
+                      <td className="px-6 py-4">
+                        <span className="bg-brand/10 text-brand px-2 py-1 rounded-md text-xs font-medium border border-brand/20">
                           {item.standards?.name || '-'}
                         </span>
                       </td>
                     )}
                     
                     {activeTab === 'chapters' && (
-                      <td className="px-6 py-4 text-gray-600">
-                        <span className="bg-purple-50 text-purple-700 px-2 py-1 rounded-md text-xs font-medium border border-purple-100">
+                      <td className="px-6 py-4">
+                        <span className="bg-purple-500/10 text-purple-500 px-2 py-1 rounded-md text-xs font-medium border border-purple-500/20">
                           {item.subjects?.name || '-'}
                         </span>
                       </td>
@@ -358,14 +405,14 @@ const Categories = () => {
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button 
                           onClick={() => openModal(item)}
-                          className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="p-2 text-muted hover:text-brand hover:bg-brand/10 rounded-lg transition-colors"
                           title="Edit"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => handleDelete(item.id)}
-                          className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          onClick={() => handleDeleteTrigger(item.id)}
+                          className="p-2 text-muted hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
                           title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -380,45 +427,30 @@ const Categories = () => {
         )}
       </div>
 
-      {/* --- ADD / EDIT MODAL --- */}
+      {/* Modal & Toast */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h3 className="font-bold text-lg text-gray-900">
-                {editingItem ? 'Edit' : 'Add New'} {activeTab.slice(0, -1)}
-              </h3>
-              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-card rounded-2xl shadow-glass border border-border w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-border flex justify-between items-center bg-page">
+              <h3 className="font-bold text-lg text-txt">{editingItem ? 'Edit' : 'Add New'} {activeTab.slice(0, -1)}</h3>
+              <button onClick={closeModal} className="text-muted hover:text-txt"><X className="w-5 h-5" /></button>
             </div>
-            
             <form onSubmit={handleSave} className="p-6 space-y-4">
-              
-              {/* Common Field: Name */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
+                <label className="block text-sm font-medium text-txt mb-1">Name <span className="text-red-500">*</span></label>
                 <input 
-                  type="text" 
-                  autoFocus
-                  required
-                  placeholder={`Enter ${activeTab.slice(0, -1)} name`}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={formData.name}
-                  onChange={e => setFormData({...formData, name: e.target.value})}
+                  type="text" autoFocus required placeholder={`Enter ${activeTab.slice(0, -1)} name`}
+                  className="w-full px-4 py-2 bg-input border border-border rounded-lg text-txt focus:ring-2 focus:ring-brand/20 outline-none"
+                  value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})}
                 />
               </div>
-
-              {/* Conditional Fields: Standard Selector */}
               {(activeTab === 'subjects' || activeTab === 'chapters') && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Select Standard <span className="text-red-500">*</span></label>
+                  <label className="block text-sm font-medium text-txt mb-1">Select Standard <span className="text-red-500">*</span></label>
                   <select
-                    required
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-                    value={formData.standard_id}
-                    onChange={e => {
-                      setFormData({...formData, standard_id: e.target.value, subject_id: ''}); // Reset subject on std change
+                    required className="w-full px-4 py-2 bg-input border border-border rounded-lg text-txt focus:ring-2 focus:ring-brand/20 outline-none"
+                    value={formData.standard_id} onChange={e => {
+                      setFormData({...formData, standard_id: e.target.value, subject_id: ''});
                       if (activeTab === 'chapters') fetchSubjects(e.target.value);
                     }}
                   >
@@ -427,56 +459,51 @@ const Categories = () => {
                   </select>
                 </div>
               )}
-
-              {/* Conditional Fields: Subject Selector */}
               {activeTab === 'chapters' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Select Subject <span className="text-red-500">*</span></label>
+                  <label className="block text-sm font-medium text-txt mb-1">Select Subject <span className="text-red-500">*</span></label>
                   <select
-                    required
-                    disabled={!formData.standard_id}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-gray-100 disabled:text-gray-400"
-                    value={formData.subject_id}
-                    onChange={e => setFormData({...formData, subject_id: e.target.value})}
+                    required disabled={!formData.standard_id}
+                    className="w-full px-4 py-2 bg-input border border-border rounded-lg text-txt focus:ring-2 focus:ring-brand/20 outline-none disabled:opacity-50"
+                    value={formData.subject_id} onChange={e => setFormData({...formData, subject_id: e.target.value})}
                   >
-                    <option value="">{formData.standard_id ? '-- Choose Subject --' : 'Select Standard First'}</option>
+                    <option value="">-- Choose Subject --</option>
                     {subjectsList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
               )}
-
-              <div className="pt-4 flex justify-end gap-3">
-                <button 
-                  type="button" 
-                  onClick={closeModal}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit" 
-                  disabled={processing}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
-                >
-                  {processing && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Save Changes
+              <div className="pt-4 flex justify-end gap-3 border-t border-border mt-6">
+                <button type="button" onClick={closeModal} className="px-4 py-2 text-muted hover:bg-page rounded-lg font-medium border border-border">Cancel</button>
+                <button type="submit" disabled={processing} className="px-6 py-2 bg-brand text-inv rounded-lg font-medium hover:bg-brand-hover transition-colors flex items-center gap-2 shadow-glass">
+                  {processing && <Loader2 className="w-4 h-4 animate-spin" />} Save Changes
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-
-      {/* Toast */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-in slide-in-from-bottom-5 fade-in ${
-          toast.type === 'success' ? 'bg-gray-900 text-white' : 'bg-red-600 text-white'
+        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-glass flex items-center gap-3 animate-in slide-in-from-bottom-5 fade-in border border-border ${
+          toast.type === 'success' ? 'bg-card text-txt' : 'bg-red-500 text-white'
         }`}>
-          {toast.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+          {toast.type === 'success' ? <CheckCircle className="w-5 h-5 text-brand" /> : <AlertCircle className="w-5 h-5" />}
           <span className="font-medium">{toast.msg}</span>
         </div>
       )}
 
+      {/* Custom Confirmation Modal */}
+      <ConfirmModal 
+        isOpen={deleteConfirm.show}
+        onClose={() => setDeleteConfirm({ ...deleteConfirm, show: false })}
+        onConfirm={handleDelete}
+        type="danger"
+        title={deleteConfirm.type === 'bulk' ? "Bulk Deletion" : "Confirm Deletion"}
+        message={deleteConfirm.type === 'bulk' 
+          ? `Are you sure you want to delete ${selectedIds.length} selected items? This will permanently remove them from the ${activeTab} table.`
+          : "Are you sure you want to delete this item? This action is permanent and might affect linked data."
+        }
+        confirmText={deleteConfirm.type === 'bulk' ? `Delete ${selectedIds.length} Items` : "Delete Item"}
+      />
     </div>
   );
 };
