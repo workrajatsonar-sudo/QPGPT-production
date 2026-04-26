@@ -43,6 +43,36 @@ const toSafeInt = (value: unknown, fallback: number) => {
   return Math.max(1, Math.floor(parsed));
 };
 
+const getModelCandidates = (requestedModel?: string) => {
+  const configuredDefault = (Deno.env.get('GEMINI_DEFAULT_MODEL') || '').trim();
+  const candidates = [
+    (requestedModel || '').trim(),
+    configuredDefault,
+    'gemini-2.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash'
+  ].filter(Boolean);
+
+  return Array.from(new Set(candidates));
+};
+
+const classifyGeminiError = (message: string) => {
+  const msg = message.toLowerCase();
+  return {
+    isModelIssue:
+      msg.includes('model') &&
+      (msg.includes('not found') || msg.includes('unsupported') || msg.includes('not available') || msg.includes('404')),
+    isKeyOrQuotaIssue:
+      msg.includes('quota') ||
+      msg.includes('rate') ||
+      msg.includes('429') ||
+      msg.includes('api key') ||
+      msg.includes('permission') ||
+      msg.includes('unauthorized') ||
+      msg.includes('invalid argument'),
+  };
+};
+
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req.headers.get('origin'));
 
@@ -58,6 +88,16 @@ serve(async (req) => {
     }
 
     // Parse incoming request context (from lib/ai.ts payload)
+    let requestPayload: any = {};
+    try {
+      requestPayload = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: 'Invalid JSON body sent to gemini-api function.' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const {
       parts,
       systemInstruction,
@@ -65,62 +105,61 @@ serve(async (req) => {
       model,
       responseMimeType,
       maxOutputTokens
-    } = await req.json();
+    } = requestPayload;
 
-    const selectedModel = model || Deno.env.get('GEMINI_DEFAULT_MODEL') || 'gemini-2.5-flash';
+    const modelCandidates = getModelCandidates(model);
     const selectedTemperature = typeof temperature === 'number' ? temperature : 0.35;
     const selectedMaxTokens = toSafeInt(
       maxOutputTokens,
-      responseMimeType === 'application/json' ? 2400 : 3000
+      responseMimeType === 'application/json' ? 4200 : 3200
     );
 
     let lastError: any = null;
-
-    for (let index = 0; index < geminiKeys.length; index += 1) {
-      const key = geminiKeys[index];
-      try {
-        const ai = new GoogleGenAI({ apiKey: key });
-        const response = await ai.models.generateContent({
-          model: selectedModel,
-          contents: [{ role: 'user', parts }],
-          config: {
-            systemInstruction,
-            temperature: selectedTemperature,
-            responseMimeType,
-            maxOutputTokens: selectedMaxTokens
-          }
-        });
-
-        return new Response(
-          JSON.stringify({
-            text: response.text,
+    for (const selectedModel of modelCandidates) {
+      for (let keyIndex = 0; keyIndex < geminiKeys.length; keyIndex += 1) {
+        const key = geminiKeys[keyIndex];
+        try {
+          const ai = new GoogleGenAI({ apiKey: key });
+          const response = await ai.models.generateContent({
             model: selectedModel,
-            key_index: index + 1
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      } catch (err: any) {
-        lastError = err;
-        const msg = (err?.message || '').toLowerCase();
-        console.warn(`Gemini key #${index + 1} failed: ${err?.message || 'unknown error'}`);
+            contents: [{ role: 'user', parts }],
+            config: {
+              systemInstruction,
+              temperature: selectedTemperature,
+              responseMimeType,
+              maxOutputTokens: selectedMaxTokens
+            }
+          });
 
-        // If this is likely a key/quota/rate error, try next key.
-        const isKeyOrQuotaIssue =
-          msg.includes('quota') ||
-          msg.includes('rate') ||
-          msg.includes('429') ||
-          msg.includes('api key') ||
-          msg.includes('permission') ||
-          msg.includes('unauthorized') ||
-          msg.includes('invalid argument');
+          const text = (response?.text || '').trim();
+          if (!text) {
+            throw new Error(`Empty AI response from model ${selectedModel}.`);
+          }
 
-        if (!isKeyOrQuotaIssue) {
-          break;
+          return new Response(
+            JSON.stringify({
+              text,
+              model: selectedModel,
+              key_index: keyIndex + 1
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        } catch (err: any) {
+          lastError = err;
+          const message = err?.message || 'unknown error';
+          const { isModelIssue, isKeyOrQuotaIssue } = classifyGeminiError(message);
+          console.warn(`Gemini model ${selectedModel}, key #${keyIndex + 1} failed: ${message}`);
+
+          // Model issue: break key loop and switch to next model.
+          if (isModelIssue) break;
+          // Key/quota issue: continue with next key on same model.
+          if (isKeyOrQuotaIssue) continue;
+          // Unknown/other issue: keep trying remaining keys for resilience.
         }
       }
     }
 
-    throw new Error(lastError?.message || 'Gemini request failed on all configured keys.');
+    throw new Error(lastError?.message || 'Gemini request failed on all configured models/keys.');
   } catch (error: any) {
     console.error("Gateway Error:", error?.message || error)
     return new Response(

@@ -264,20 +264,29 @@ const QuizGame = () => {
       const userPrompt = `SOURCE CONTENT:\n${activeTab === 'text' ? sourceText : '(See attached file)'}`;
       parts.push({ text: userPrompt });
 
-      const text = await generateAIContent({
+      const generatePayload = (tokens: number) => ({
         model: 'gemini-2.5-flash',
         parts,
         systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: 'application/json',
+        responseMimeType: 'application/json' as const,
         temperature: 0.35,
-        maxOutputTokens: 2200
+        maxOutputTokens: tokens
       });
 
+      let text = await generateAIContent(generatePayload(4200));
       if (!text) throw new Error("Failed to generate quiz data.");
 
       // Strip markdown code fences if Gemini wraps the JSON (e.g. ```json ... ```)
-      const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-      const data: QuizData = JSON.parse(cleanText);
+      let cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+      let data: QuizData;
+      try {
+        data = JSON.parse(cleanText);
+      } catch {
+        // One retry with higher token budget to avoid truncated JSON in production.
+        text = await generateAIContent(generatePayload(6000));
+        cleanText = (text || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+        data = JSON.parse(cleanText);
+      }
       setQuizData(data);
       setGameState('playing');
       setCurrentQIndex(0);

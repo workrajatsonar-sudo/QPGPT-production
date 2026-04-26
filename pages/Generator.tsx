@@ -427,29 +427,37 @@ const Generator = () => {
              parts.push({ text: `SOURCE CONTENT:\n${sourceText}\n\n${prompt}` });
         }
 
-        const text = await generateAIContent({
+        const generatePayload = (tokens: number) => ({
             parts,
             systemInstruction: "You are an academic exam paper generator. Return strict JSON only, obey the requested section counts exactly, and use only the provided source content.",
             temperature: 0.3,
             model: 'gemini-2.5-flash',
-            responseMimeType: 'application/json',
-            maxOutputTokens: 2800
+            responseMimeType: 'application/json' as const,
+            maxOutputTokens: tokens
         });
-        if (text) {
-            const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-            const parsed: StructuredPaper = JSON.parse(cleanText);
-            const validationError = validateStructuredPaper(parsed, enabledQuestions);
 
-            if (validationError) {
-                throw new Error(validationError);
-            }
+        let text = await generateAIContent(generatePayload(5200));
+        if (!text) throw new Error("No content generated.");
 
-            const formattedPaper = formatGeneratedPaper(details, parsed);
-            setGeneratedContent(formattedPaper);
-            setIsEditable(true);
-        } else {
-            throw new Error("No content generated.");
+        let cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+        let parsed: StructuredPaper;
+        try {
+            parsed = JSON.parse(cleanText);
+        } catch {
+            // One retry with larger token budget to avoid truncated JSON.
+            text = await generateAIContent(generatePayload(7000));
+            cleanText = (text || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+            parsed = JSON.parse(cleanText);
         }
+
+        const validationError = validateStructuredPaper(parsed, enabledQuestions);
+        if (validationError) {
+            throw new Error(validationError);
+        }
+
+        const formattedPaper = formatGeneratedPaper(details, parsed);
+        setGeneratedContent(formattedPaper);
+        setIsEditable(true);
 
     } catch (e: any) {
         console.error(e);
