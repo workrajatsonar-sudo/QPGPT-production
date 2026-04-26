@@ -269,7 +269,8 @@ const QuizGame = () => {
         parts,
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: 'application/json',
-        temperature: 0.4
+        temperature: 0.35,
+        maxOutputTokens: 2200
       });
 
       if (!text) throw new Error("Failed to generate quiz data.");

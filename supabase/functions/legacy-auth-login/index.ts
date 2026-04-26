@@ -5,9 +5,25 @@ import bcrypt from 'npm:bcryptjs@2.4.3'
 
 console.log("legacy-auth-login function started");
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+const getCorsHeaders = (origin: string | null) => {
+  const allowList = (Deno.env.get('ALLOWED_ORIGINS') || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const allowOrigin = !origin
+    ? '*'
+    : allowList.length === 0 || allowList.includes(origin)
+      ? origin
+      : '*';
+
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
+  };
 };
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -79,9 +95,11 @@ async function findLegacyUser(identifier, password) {
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req.headers.get('origin'));
+
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { status: 200, headers: corsHeaders });
   }
 
   try {

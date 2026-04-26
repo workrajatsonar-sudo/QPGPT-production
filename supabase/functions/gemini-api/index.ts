@@ -13,7 +13,7 @@ const getCorsHeaders = (origin: string | null) => {
     ? '*'
     : allowList.length === 0 || allowList.includes(origin)
       ? origin
-      : allowList[0];
+      : '*';
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,
@@ -22,6 +22,25 @@ const getCorsHeaders = (origin: string | null) => {
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
   };
+};
+
+const getGeminiKeys = () => {
+  const keys: string[] = [];
+  const primary = (Deno.env.get('GEMINI_API_KEY') || '').trim();
+  if (primary) keys.push(primary);
+
+  for (let i = 1; i <= 10; i += 1) {
+    const candidate = (Deno.env.get(`GEMINI_API_KEY_${i}`) || '').trim();
+    if (candidate) keys.push(candidate);
+  }
+
+  return Array.from(new Set(keys));
+};
+
+const toSafeInt = (value: unknown, fallback: number) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.floor(parsed));
 };
 
 serve(async (req) => {
@@ -33,39 +52,79 @@ serve(async (req) => {
   }
 
   try {
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-    if (!GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY is not configured in Supabase Edge Secrets.");
+    const geminiKeys = getGeminiKeys();
+    if (geminiKeys.length === 0) {
+      throw new Error("No Gemini key configured. Add GEMINI_API_KEY or GEMINI_API_KEY_1..N in Supabase Edge Secrets.");
     }
 
-
     // Parse incoming request context (from lib/ai.ts payload)
-    const { parts, systemInstruction, temperature, model = 'gemini-1.5-flash', responseMimeType } = await req.json();
+    const {
+      parts,
+      systemInstruction,
+      temperature,
+      model,
+      responseMimeType,
+      maxOutputTokens
+    } = await req.json();
 
-    // Initialize the official SDK
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-
-    // Execute AI request
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: [{ role: 'user', parts }],
-      config: {
-        systemInstruction,
-        temperature: temperature || 0.7,
-        responseMimeType: responseMimeType
-      }
-    });
-
-    // Return the response back securely to your React frontend
-    return new Response(
-      JSON.stringify({ text: response.text }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    const selectedModel = model || Deno.env.get('GEMINI_DEFAULT_MODEL') || 'gemini-2.5-flash';
+    const selectedTemperature = typeof temperature === 'number' ? temperature : 0.35;
+    const selectedMaxTokens = toSafeInt(
+      maxOutputTokens,
+      responseMimeType === 'application/json' ? 2400 : 3000
     );
 
-  } catch (error) {
-    console.error("Gateway Error:", error.message)
+    let lastError: any = null;
+
+    for (let index = 0; index < geminiKeys.length; index += 1) {
+      const key = geminiKeys[index];
+      try {
+        const ai = new GoogleGenAI({ apiKey: key });
+        const response = await ai.models.generateContent({
+          model: selectedModel,
+          contents: [{ role: 'user', parts }],
+          config: {
+            systemInstruction,
+            temperature: selectedTemperature,
+            responseMimeType,
+            maxOutputTokens: selectedMaxTokens
+          }
+        });
+
+        return new Response(
+          JSON.stringify({
+            text: response.text,
+            model: selectedModel,
+            key_index: index + 1
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (err: any) {
+        lastError = err;
+        const msg = (err?.message || '').toLowerCase();
+        console.warn(`Gemini key #${index + 1} failed: ${err?.message || 'unknown error'}`);
+
+        // If this is likely a key/quota/rate error, try next key.
+        const isKeyOrQuotaIssue =
+          msg.includes('quota') ||
+          msg.includes('rate') ||
+          msg.includes('429') ||
+          msg.includes('api key') ||
+          msg.includes('permission') ||
+          msg.includes('unauthorized') ||
+          msg.includes('invalid argument');
+
+        if (!isKeyOrQuotaIssue) {
+          break;
+        }
+      }
+    }
+
+    throw new Error(lastError?.message || 'Gemini request failed on all configured keys.');
+  } catch (error: any) {
+    console.error("Gateway Error:", error?.message || error)
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error?.message || 'Unknown gateway error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

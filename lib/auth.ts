@@ -8,6 +8,7 @@ const ENABLE_LEGACY_LOGIN_EDGE = import.meta.env.VITE_ENABLE_LEGACY_LOGIN_EDGE =
 const PROFILE_PASSWORD_PLACEHOLDER = '__managed_by_supabase_auth__';
 const ENABLE_LOCAL_LEGACY_MIGRATION = import.meta.env.VITE_ENABLE_LOCAL_LEGACY_MIGRATION !== 'false';
 const ENABLE_LOCAL_LEGACY_SESSION_FALLBACK = import.meta.env.VITE_ENABLE_LOCAL_LEGACY_SESSION_FALLBACK !== 'false';
+const ENABLE_PROD_LEGACY_SESSION_FALLBACK = import.meta.env.VITE_ENABLE_PROD_LEGACY_SESSION_FALLBACK === 'true';
 
 const PROFILE_COLUMNS = `
   id,
@@ -67,6 +68,11 @@ const broadcastAuthChange = () => {
 const isLocalHost = () => {
   if (typeof window === 'undefined') return false;
   return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+};
+
+const canUseLegacySessionFallback = () => {
+  if (!ENABLE_LOCAL_LEGACY_SESSION_FALLBACK) return false;
+  return isLocalHost() || ENABLE_PROD_LEGACY_SESSION_FALLBACK;
 };
 
 export const clearCachedProfile = () => {
@@ -268,7 +274,7 @@ const migrateLegacyLoginLocallyIfNeeded = async (identifier: string, password: s
 };
 
 const tryLocalLegacySessionFallback = async (identifier: string, password: string): Promise<UserProfile | null> => {
-  if (!ENABLE_LOCAL_LEGACY_SESSION_FALLBACK || !isLocalHost()) return null;
+  if (!canUseLegacySessionFallback()) return null;
 
   const legacyUser = await getLegacyUserByIdentifier(identifier);
   if (!legacyUser || legacyUser.status === 'disabled') return null;
@@ -555,11 +561,7 @@ export const signUpStudent = async (input: StudentSignupInput) => {
 export const syncProfileFromSession = async (): Promise<UserProfile | null> => {
   const { data, error } = await supabase.auth.getUser();
   if (error) {
-    if (
-      ENABLE_LOCAL_LEGACY_SESSION_FALLBACK &&
-      isLocalHost() &&
-      localStorage.getItem(LEGACY_SESSION_KEY) === '1'
-    ) {
+    if (canUseLegacySessionFallback() && localStorage.getItem(LEGACY_SESSION_KEY) === '1') {
       const cached = getCachedProfile();
       if (cached) return cached;
     }
@@ -569,7 +571,7 @@ export const syncProfileFromSession = async (): Promise<UserProfile | null> => {
 
   const authUser = data.user;
   if (!authUser?.email) {
-    if (ENABLE_LOCAL_LEGACY_SESSION_FALLBACK && isLocalHost() && localStorage.getItem(LEGACY_SESSION_KEY) === '1') {
+    if (canUseLegacySessionFallback() && localStorage.getItem(LEGACY_SESSION_KEY) === '1') {
       const cached = getCachedProfile();
       if (cached) return cached;
     }

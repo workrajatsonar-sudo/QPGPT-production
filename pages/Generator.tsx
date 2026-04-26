@@ -432,7 +432,8 @@ const Generator = () => {
             systemInstruction: "You are an academic exam paper generator. Return strict JSON only, obey the requested section counts exactly, and use only the provided source content.",
             temperature: 0.3,
             model: 'gemini-2.5-flash',
-            responseMimeType: 'application/json'
+            responseMimeType: 'application/json',
+            maxOutputTokens: 2800
         });
         if (text) {
             const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
