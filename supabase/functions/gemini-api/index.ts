@@ -1,16 +1,35 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { GoogleGenAI } from "npm:@google/genai@1.39.0"
 
-// Configure CORS headers for browsers
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // Adjust this to your specific domain in production
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+const getCorsHeaders = (origin: string | null) => {
+  // Optional comma-separated allow list via edge secret, e.g.
+  // https://yourapp.vercel.app,https://www.yourapp.com,http://localhost:3000
+  const allowList = (Deno.env.get('ALLOWED_ORIGINS') || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const allowOrigin = !origin
+    ? '*'
+    : allowList.length === 0 || allowList.includes(origin)
+      ? origin
+      : allowList[0];
+
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
+  };
+};
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req.headers.get('origin'));
+
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response('ok', { status: 200, headers: corsHeaders })
   }
 
   try {
