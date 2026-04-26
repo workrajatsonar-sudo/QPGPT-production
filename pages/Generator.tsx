@@ -746,6 +746,9 @@ const Generator = () => {
                 {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />}
                 {isGenerating ? 'Processing...' : 'Generate Paper with AI'}
               </button>
+              <p className="mt-2 text-xs text-muted">
+                Due to low-tier API and free model usage, paper generation may fail sometimes. Please retry.
+              </p>
            </div>
         </div>
 

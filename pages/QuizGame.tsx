@@ -697,6 +697,9 @@ const QuizGame = () => {
                 >
                    <Play className="w-5 h-5 fill-current" /> Start Quiz
                 </button>
+                <p className="mt-2 text-xs text-muted text-center">
+                  Due to low-tier API and free model usage, quiz generation may fail sometimes. Please retry.
+                </p>
              </div>
          </div>
 
