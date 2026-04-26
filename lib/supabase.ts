@@ -1,8 +1,12 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://ojvqdxtyvbzyartmyxuq.supabase.co';
-const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qdnFkeHR5dmJ6eWFydG15eHVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMzkyNTEsImV4cCI6MjA4NDkxNTI1MX0.OGKlA5_HxzxYhCJG2f2cgl_7qjvEoxBY-gfxlvOBNzE';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.error("Missing Supabase environment variables! Check your .env.local file.");
+}
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -12,10 +16,36 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 //      'uploaded/x.pdf'              → 'uploaded/x.pdf'
 const getCleanPath = (path: string, bucket: string): string => {
   if (!path) return '';
-  let cleanPath = path.replace(/^\/+/, ''); // strip leading slashes
+
+  // If a full Supabase storage URL was saved, extract only the object path.
+  const storageUrlMarker = `/storage/v1/object/public/${bucket}/`;
+  const signedUrlMarker = `/storage/v1/object/sign/${bucket}/`;
+  const publicIndex = path.indexOf(storageUrlMarker);
+  const signedIndex = path.indexOf(signedUrlMarker);
+
+  let cleanPath = path;
+  if (publicIndex >= 0) {
+    cleanPath = path.substring(publicIndex + storageUrlMarker.length);
+  } else if (signedIndex >= 0) {
+    cleanPath = path.substring(signedIndex + signedUrlMarker.length);
+    cleanPath = cleanPath.split('?')[0];
+  }
+
+  // Normalize Windows-style paths and strip leading slashes.
+  cleanPath = cleanPath.replace(/\\/g, '/').replace(/^\/+/, '');
+
   if (cleanPath.startsWith(bucket + '/')) {
     cleanPath = cleanPath.substring(bucket.length + 1);
   }
+
+  // Decode URL-encoded object paths once, then re-trim leading slashes.
+  try {
+    cleanPath = decodeURIComponent(cleanPath);
+  } catch {
+    // Ignore malformed sequences and use the raw path.
+  }
+  cleanPath = cleanPath.replace(/^\/+/, '');
+
   return cleanPath;
 };
 

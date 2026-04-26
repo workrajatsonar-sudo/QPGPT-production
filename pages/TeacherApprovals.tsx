@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { 
+import {
   UserCheck, 
   CheckCircle, 
   XCircle, 
@@ -20,8 +20,8 @@ import {
   Eye,
   ArrowRight
 } from 'lucide-react';
-import bcrypt from 'bcryptjs';
 import { useNavigate } from 'react-router-dom';
+import { getCachedProfile } from '../lib/auth';
 
 interface TeacherApp {
   id: string;
@@ -67,26 +67,61 @@ const TeacherApprovals = () => {
 
   const fetchApplications = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('teacher_applications')
-      .select('*')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false });
-    
-    if (data) setApps(data);
-    setLoading(false);
+    try {
+      const { data, error } = await supabase
+        .from('teacher_applications')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error("Fetch Applications Error:", error);
+        showToast("Failed to load applications: " + error.message, 'error');
+        return;
+      }
+
+      setApps(data || []);
+    } catch (err: any) {
+      console.error("Critical Failure in fetchApplications:", err);
+      showToast("A network error occurred. Please refresh.", 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const loadSignedUrls = async (app: TeacherApp) => {
-    const { data: profile } = await supabase.storage.from('teacher-verification-docs').createSignedUrl(app.profile_photo_path, 3600);
-    const { data: idcard } = await supabase.storage.from('teacher-verification-docs').createSignedUrl(app.id_card_path, 3600);
-    const { data: video } = await supabase.storage.from('teacher-verification-docs').createSignedUrl(app.verification_video_path, 3600);
+    const resolveUrl = async (storedPath?: string | null) => {
+      if (!storedPath) return null;
 
-    setSignedUrls({
-      profile: profile?.signedUrl || null,
-      idcard: idcard?.signedUrl || null,
-      video: video?.signedUrl || null,
-    });
+      // Backward-compatible format:
+      // - "teacher-verification-docs/<path>"
+      // - "question-files/<path>"
+      // - "<path>" (legacy, default bucket teacher-verification-docs)
+      const hasBucketPrefix = storedPath.includes('/');
+      const [firstSegment, ...rest] = storedPath.split('/');
+      const bucket = hasBucketPrefix && (firstSegment === 'teacher-verification-docs' || firstSegment === 'question-files')
+        ? firstSegment
+        : 'teacher-verification-docs';
+      const objectPath = bucket === firstSegment ? rest.join('/') : storedPath;
+
+      if (!objectPath) return null;
+
+      if (bucket === 'question-files') {
+        const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+        return data?.publicUrl || null;
+      }
+
+      const { data } = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600);
+      return data?.signedUrl || null;
+    };
+
+    const [profile, idcard, video] = await Promise.all([
+      resolveUrl(app.profile_photo_path),
+      resolveUrl(app.id_card_path),
+      resolveUrl(app.verification_video_path),
+    ]);
+
+    setSignedUrls({ profile, idcard, video });
   };
 
   const handleSelect = (app: TeacherApp) => {
@@ -98,8 +133,7 @@ const TeacherApprovals = () => {
   // This prevents the "Foreign Key Violation" error.
   // It ensures the ID in localStorage actually exists in public.users before we try to use it in an UPDATE query.
   const getVerifiedAdminId = async () => {
-    const adminStr = localStorage.getItem('qb_user');
-    const adminSession = adminStr ? JSON.parse(adminStr) : null;
+    const adminSession = getCachedProfile();
 
     if (!adminSession?.id) {
         alert("Session invalid. Please log in again.");
@@ -121,6 +155,12 @@ const TeacherApprovals = () => {
 
   const handleApprove = async () => {
     if (!selectedApp) return;
+
+    const normalizedEmail = selectedApp.email.trim().toLowerCase();
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      alert(`Invalid teacher email: "${selectedApp.email}". Ask the applicant to resubmit with a valid email.`);
+      return;
+    }
     
     // 0. Validate Session
     const adminId = await getVerifiedAdminId();
@@ -130,14 +170,12 @@ const TeacherApprovals = () => {
     try {
       // 1. Prepare Credentials
       const defaultPassword = "Teacher@" + Math.floor(1000 + Math.random() * 9000);
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(defaultPassword, salt);
 
       // 2. Check if user already exists
       const { data: existingUser } = await supabase
         .from('users')
         .select('id')
-        .eq('email', selectedApp.email)
+        .ilike('email', normalizedEmail)
         .maybeSingle();
 
       if (existingUser) {
@@ -147,8 +185,9 @@ const TeacherApprovals = () => {
           .update({
             role: 'teacher',
             status: 'active', // Ensure account is enabled
-            password: hashedPassword, // Reset password
-            full_name: selectedApp.full_name // Update name if needed
+            password: defaultPassword, // Temporary password for legacy login migration
+            full_name: selectedApp.full_name.trim(), // Update name if needed
+            email: normalizedEmail
           })
           .eq('id', existingUser.id);
 
@@ -156,15 +195,15 @@ const TeacherApprovals = () => {
       } else {
         // INSERT new user
         const { error: userError } = await supabase.from('users').insert({
-          full_name: selectedApp.full_name,
-          display_name: selectedApp.full_name,
-          email: selectedApp.email,
-          username: selectedApp.email.split('@')[0] + '_' + Math.floor(Math.random()*10000), 
-          password: hashedPassword,
+          full_name: selectedApp.full_name.trim(),
+          display_name: selectedApp.full_name.trim(),
+          email: normalizedEmail,
+          username: normalizedEmail.split('@')[0] + '_' + Math.floor(Math.random()*10000), 
+          password: defaultPassword,
           role: 'teacher',
           status: 'active',
           level_of_study: 'School', 
-          subjects_of_interest: selectedApp.subject_specialization.split(',')
+          subjects_of_interest: selectedApp.subject_specialization.split(',').map(s => s.trim()).filter(Boolean)
         });
 
         if (userError) throw new Error("Failed to create user account: " + userError.message);
@@ -188,7 +227,7 @@ const TeacherApprovals = () => {
         details: `Approved teacher: ${selectedApp.full_name}`
       });
 
-      setCreatedUserCreds({ email: selectedApp.email, password: defaultPassword });
+      setCreatedUserCreds({ email: normalizedEmail, password: defaultPassword });
       setSuccessModalOpen(true);
 
       setApps(prev => prev.filter(a => a.id !== selectedApp.id));
@@ -255,10 +294,10 @@ const TeacherApprovals = () => {
   };
 
   return (
-    <div className="flex h-full bg-page overflow-hidden">
+    <div className="flex flex-col lg:flex-row h-full bg-page overflow-hidden">
       
-      {/* List Sidebar */}
-      <div className="w-1/3 min-w-[320px] bg-card border-r border-border flex flex-col">
+      {/* List Sidebar — full width on mobile, hidden when detail selected on mobile */}
+      <div className={`${selectedApp ? 'hidden lg:flex' : 'flex'} lg:flex w-full lg:w-1/3 lg:min-w-[320px] bg-card border-r border-border flex-col`}>
          <div className="p-6 border-b border-border">
             <h2 className="text-xl font-bold text-txt flex items-center gap-2">
                <UserCheck className="w-6 h-6 text-blue-600" /> Teacher Requests
@@ -292,10 +331,18 @@ const TeacherApprovals = () => {
          </div>
       </div>
 
-      {/* Detail View */}
-      <div className="flex-1 overflow-y-auto bg-page p-8">
+      {/* Detail View — full screen on mobile when app selected */}
+      <div className={`${selectedApp ? 'flex' : 'hidden lg:flex'} flex-1 overflow-y-auto bg-page p-4 sm:p-8 flex-col`}>
          {selectedApp ? (
             <div className="max-w-3xl mx-auto space-y-6">
+               
+               {/* Back button for mobile */}
+               <button
+                 onClick={() => setSelectedApp(null)}
+                 className="lg:hidden text-xs text-brand font-bold flex items-center gap-1 mb-2"
+               >
+                 ← Back to list
+               </button>
                
                {/* Header Info */}
                <div className="bg-card rounded-2xl border border-border p-6 shadow-sm">
@@ -337,7 +384,7 @@ const TeacherApprovals = () => {
                </div>
 
                {/* Proof Documents */}
-               <div className="grid grid-cols-2 gap-6">
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   {/* Photo */}
                   <div className="bg-card p-4 rounded-xl border border-border">
                      <h4 className="font-bold text-sm text-txt mb-3 flex items-center gap-2"><ImageIcon className="w-4 h-4"/> Profile Photo</h4>

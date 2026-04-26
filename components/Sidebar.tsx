@@ -36,7 +36,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user, isOpen, onClose }) => {
     if (user.role !== "admin") return;
 
     const fetchCounts = async () => {
-      // Content Approvals
+      // Content Approvals: only count genuinely new/unseen pending items
       const { count: fileCount } = await supabase
         .from("files")
         .select("*", { count: "exact", head: true })
@@ -45,11 +45,12 @@ const Sidebar: React.FC<SidebarProps> = ({ user, isOpen, onClose }) => {
 
       setApprovalCount(fileCount || 0);
 
-      // Teacher Requests
+      // Teacher Requests: only count ones not yet reviewed
       const { count: teacherCount } = await supabase
         .from("teacher_applications")
         .select("*", { count: "exact", head: true })
-        .eq("status", "pending");
+        .eq("status", "pending")
+        .is("reviewed_at", null);
 
       setTeacherRequestCount(teacherCount || 0);
     };

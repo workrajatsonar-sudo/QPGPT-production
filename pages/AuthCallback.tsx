@@ -1,35 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Loader2, AlertCircle } from 'lucide-react';
+import { resolveProfileByEmail, cacheProfile, clearCachedProfile } from '../lib/auth';
 
 const AuthCallback = () => {
   const [error, setError] = useState<string | null>(null);
 
   const redirectToAppRoute = (path: string) => {
     window.location.replace(`${window.location.origin}/#${path}`);
-  };
-
-  const findUserByEmail = async (email?: string | null) => {
-    const normalizedEmail = email?.trim().toLowerCase();
-    if (!normalizedEmail) return null;
-
-    const { data: exactProfile } = await supabase
-      .from('users')
-      .select('*')
-      .ilike('email', normalizedEmail)
-      .maybeSingle();
-
-    if (exactProfile) return exactProfile;
-
-    const { data: possibleProfiles } = await supabase
-      .from('users')
-      .select('*')
-      .ilike('email', `%${normalizedEmail}%`)
-      .limit(10);
-
-    return (possibleProfiles || []).find(
-      (profile: any) => profile.email?.trim().toLowerCase() === normalizedEmail
-    ) || null;
   };
 
   useEffect(() => {
@@ -108,19 +86,16 @@ const AuthCallback = () => {
 
           // Helper to process OAuth user
           const processOAuthUser = async (authUser: any) => {
-            const profile = await findUserByEmail(authUser.email);
+            const profile = await resolveProfileByEmail(authUser.email);
 
             if (profile) {
-              const safeUser = { ...profile, password: '' };
-              localStorage.setItem('qb_user', JSON.stringify(safeUser));
-              localStorage.setItem('qb_session_token', `oauth_token_${Date.now()}`);
+              cacheProfile(profile);
               redirectToAppRoute(`/dashboard/${profile.role || 'student'}`);
               return true;
             }
 
             await supabase.auth.signOut();
-            localStorage.removeItem('qb_user');
-            localStorage.removeItem('qb_session_token');
+            clearCachedProfile();
             setError('Your account was not found. Please create an account first.');
             setTimeout(() => redirectToAppRoute('/signup'), 2200);
             return false;

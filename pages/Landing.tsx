@@ -18,10 +18,9 @@ import {
   Sparkles,
   User,
 } from "lucide-react";
-import { supabase } from "../lib/supabase";
 import logo from "../components/assets/1QPGPT-fevicon.png";
 import favicon from "../components/assets/QPGPT-fevicon.png";
-import bcrypt from "bcryptjs";
+import { signInWithIdentifier } from "../lib/auth";
 
 const Landing = () => {
   const navigate = useNavigate();
@@ -61,48 +60,14 @@ const Landing = () => {
     setError("");
 
     try {
-      const cleanInput = loginInput.trim().replace(/["']/g, "");
-
-      let { data: user, error: fetchError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("email", cleanInput)
-        .maybeSingle();
-
-      if (!user && !fetchError) {
-        const result = await supabase
-          .from("users")
-          .select("*")
-          .eq("username", cleanInput)
-          .maybeSingle();
-        user = result.data;
-        fetchError = result.error;
-      }
-
-      if (fetchError || !user) throw new Error("Invalid credentials (no user found)");
-
-      if (user.status === "disabled") throw new Error("Account disabled.");
-
-      let isValidPassword = false;
-      if (user.password === password.trim()) {
-        isValidPassword = true;
-      } else {
-        try {
-          isValidPassword = await bcrypt.compare(password.trim(), user.password);
-        } catch (e) { /* ignore */ }
-      }
-
-      if (!isValidPassword) throw new Error("Incorrect Password. Please double check what you typed.");
-
-      if (!user.role || !user.role.toLowerCase().includes("admin")) {
+      const user = await signInWithIdentifier(loginInput, password);
+      if (user.role !== "admin") {
         throw new Error(`Access denied: Not an admin. Current role is: ${user.role}`);
       }
 
-      const sessionUser = { ...user, role: "admin", password: "" };
-      localStorage.setItem("qb_user", JSON.stringify(sessionUser));
-      localStorage.setItem("qb_session_token", `mock_token_${Date.now()}`);
       window.dispatchEvent(new Event("auth-change"));
-      navigate("/dashboard/admin");
+      setIsAdminDialogOpen(false);
+      navigate("/dashboard/admin", { replace: true });
     } catch (err: any) {
       setLoading(false);
       setError(err.message || "Login failed");
@@ -118,22 +83,22 @@ const Landing = () => {
 
       {/* Header */}
       <header className="fixed top-0 w-full bg-page/60 backdrop-blur-xl z-50 border-b border-border/40 transition-all duration-300">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-brand to-purple-600 flex items-center justify-center shadow-lg shadow-brand/25 group-hover:scale-105 transition-transform duration-300">
-              <img src={logo} alt="QPGPT Logo" className="w-8 h-8 object-contain" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between">
+          <div className="flex items-center gap-2 sm:gap-3 group cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-br from-brand to-purple-600 flex items-center justify-center shadow-lg shadow-brand/25 group-hover:scale-105 transition-transform duration-300">
+              <img src={logo} alt="QPGPT Logo" className="w-6 h-6 sm:w-8 sm:h-8 object-contain" />
             </div>
-            <span className="text-xl font-black text-txt tracking-tighter">QPGPT</span>
+            <span className="text-lg sm:text-xl font-black text-txt tracking-tighter">QPGPT</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <button
               onClick={cycleTheme}
-              className="p-2.5 text-muted hover:text-txt hover:bg-card/80 rounded-xl transition-all border border-transparent hover:border-border/50 hover:shadow-sm"
+              className="p-2 sm:p-2.5 text-muted hover:text-txt hover:bg-card/80 rounded-xl transition-all border border-transparent hover:border-border/50 hover:shadow-sm"
               title="Toggle Theme"
             >
-              {theme === "white" && <Sun className="w-5 h-5" />}
-              {theme === "black" && <Moon className="w-5 h-5" />}
-              {theme === "space" && <Monitor className="w-5 h-5" />}
+              {theme === "white" && <Sun className="w-4 h-4 sm:w-5 sm:h-5" />}
+              {theme === "black" && <Moon className="w-4 h-4 sm:w-5 sm:h-5" />}
+              {theme === "space" && <Monitor className="w-4 h-4 sm:w-5 sm:h-5" />}
             </button>
             <button
               onClick={() => setIsAdminDialogOpen(true)}
@@ -143,48 +108,48 @@ const Landing = () => {
             </button>
             <button
               onClick={() => navigate("/login")}
-              className="text-sm font-bold text-txt px-5 py-2.5 rounded-xl hover:bg-card/80 transition-all border border-border/50 shadow-sm hover:shadow"
+              className="text-xs sm:text-sm font-bold text-txt px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl hover:bg-card/80 transition-all border border-border/50 shadow-sm hover:shadow"
             >
               Log in
             </button>
             <button
               onClick={() => navigate("/signup")}
-              className="bg-txt text-page text-sm font-bold px-6 py-2.5 rounded-xl hover:scale-105 transition-transform shadow-lg shadow-txt/10 flex items-center gap-2 group"
+              className="bg-txt text-page text-xs sm:text-sm font-bold px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl hover:scale-105 transition-transform shadow-lg shadow-txt/10 flex items-center gap-1 sm:gap-2 group"
             >
-              Get started <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              Get started <ArrowRight className="w-3 h-3 sm:w-4 sm:h-4 group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
         </div>
       </header>
 
       {/* Hero Section */}
-      <section className="pt-40 pb-24 px-6 relative z-10">
+      <section className="pt-28 sm:pt-40 pb-16 sm:pb-24 px-4 sm:px-6 relative z-10">
         <div className="max-w-7xl mx-auto">
           <div className="max-w-4xl mx-auto text-center relative z-10 flex flex-col items-center">
-            <div className="inline-flex items-center gap-2 text-xs font-bold text-brand bg-brand/10 border border-brand/20 px-4 py-2 rounded-full mb-8 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-700">
+            <div className="inline-flex items-center gap-2 text-xs font-bold text-brand bg-brand/10 border border-brand/20 px-4 py-2 rounded-full mb-6 sm:mb-8 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-700">
               <Sparkles className="w-4 h-4" />
               Next-Gen AI Study Assistant
             </div>
 
-            <h1 className="text-5xl lg:text-7xl font-black text-txt leading-[1.1] mb-6 tracking-tight animate-in slide-in-from-bottom-6 duration-700 delay-100">
+            <h1 className="text-4xl sm:text-5xl lg:text-7xl font-black text-txt leading-[1.1] mb-4 sm:mb-6 tracking-tight animate-in slide-in-from-bottom-6 duration-700 delay-100 px-2">
               Your notes deserve better than <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand via-purple-500 to-brand bg-[length:200%_auto] animate-gradient">cramming.</span>
             </h1>
 
-            <p className="text-lg lg:text-xl text-muted leading-relaxed mb-10 max-w-2xl font-medium animate-in slide-in-from-bottom-8 duration-700 delay-200">
+            <p className="text-base sm:text-lg lg:text-xl text-muted leading-relaxed mb-8 sm:mb-10 max-w-2xl font-medium animate-in slide-in-from-bottom-8 duration-700 delay-200 px-2">
               Upload any syllabus or notes. QPGPT turns them into custom quizzes,
               past papers, and AI explanations — in seconds, not hours.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-4 mb-10 justify-center animate-in slide-in-from-bottom-10 duration-700 delay-300">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-8 sm:mb-10 justify-center animate-in slide-in-from-bottom-10 duration-700 delay-300 w-full sm:w-auto px-4 sm:px-0">
               <button
                 onClick={() => navigate("/signup")}
-                className="px-8 py-4 bg-gradient-to-r from-brand to-purple-600 text-white rounded-2xl font-bold text-lg hover:shadow-xl hover:shadow-brand/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 group"
+                className="px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-brand to-purple-600 text-white rounded-2xl font-bold text-base sm:text-lg hover:shadow-xl hover:shadow-brand/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 group"
               >
-                Start learning for free <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                Start learning for free <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 group-hover:translate-x-1 transition-transform" />
               </button>
               <button
                 onClick={() => navigate("/questions")}
-                className="px-8 py-4 bg-card/50 backdrop-blur-md border border-border text-txt rounded-2xl font-bold text-lg hover:bg-card hover:border-brand/30 hover:shadow-lg transition-all"
+                className="px-6 sm:px-8 py-3 sm:py-4 bg-card/50 backdrop-blur-md border border-border text-txt rounded-2xl font-bold text-base sm:text-lg hover:bg-card hover:border-brand/30 hover:shadow-lg transition-all"
               >
                 Browse questions
               </button>
@@ -193,38 +158,38 @@ const Landing = () => {
             <div className="flex items-center justify-center gap-4 text-sm font-medium text-muted animate-in slide-in-from-bottom-12 duration-700 delay-500">
               <div className="flex -space-x-2">
                 {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="w-8 h-8 rounded-full bg-gradient-to-br from-brand/20 to-purple-500/20 border-2 border-page flex items-center justify-center backdrop-blur-sm">
+                  <div key={i} className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-brand/20 to-purple-500/20 border-2 border-page flex items-center justify-center backdrop-blur-sm">
                     <User className="w-3 h-3 text-brand" />
                   </div>
                 ))}
               </div>
-              <p>Join 10,000+ top students</p>
+              <p className="text-sm">Join 10,000+ top students</p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Social proof - Minimalist Logos */}
-      <section className="py-10 border-y border-border/40 bg-card/30 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-6">
-          <p className="text-xs font-bold text-muted/60 text-center mb-6 uppercase tracking-widest">Trusted by students worldwide</p>
-          <div className="flex flex-wrap items-center justify-center gap-12 text-muted/40 grayscale opacity-70 hover:grayscale-0 hover:opacity-100 transition-all duration-500">
+      {/* Social proof */}
+      <section className="py-8 sm:py-10 border-y border-border/40 bg-card/30 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <p className="text-xs font-bold text-muted/60 text-center mb-4 sm:mb-6 uppercase tracking-widest">Trusted by students worldwide</p>
+          <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-12 text-muted/40 grayscale opacity-70 hover:grayscale-0 hover:opacity-100 transition-all duration-500">
             {['MIT', 'Stanford', 'Oxford', 'Cambridge', 'Harvard'].map((uni) => (
-              <span key={uni} className="text-xl md:text-2xl font-black tracking-tighter hover:text-brand transition-colors cursor-default">{uni}</span>
+              <span key={uni} className="text-lg sm:text-xl md:text-2xl font-black tracking-tighter hover:text-brand transition-colors cursor-default">{uni}</span>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Features - Premium Cards */}
-      <section className="py-32 px-6 relative">
+      {/* Features */}
+      <section className="py-16 sm:py-32 px-4 sm:px-6 relative">
         <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-20">
-            <h2 className="text-4xl lg:text-5xl font-black text-txt mb-6 tracking-tight">An ecosystem built for <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand to-purple-500">mastery.</span></h2>
-            <p className="text-xl text-muted max-w-2xl mx-auto">More than just flashcards. We provide the complete suite to dissect, understand, and conquer your exams.</p>
+          <div className="text-center mb-12 sm:mb-20">
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-txt mb-4 sm:mb-6 tracking-tight">An ecosystem built for <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand to-purple-500">mastery.</span></h2>
+            <p className="text-lg sm:text-xl text-muted max-w-2xl mx-auto">More than just flashcards. We provide the complete suite to dissect, understand, and conquer your exams.</p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 sm:gap-8">
             {/* Generator */}
             <div className="bg-card/50 backdrop-blur-sm border border-border rounded-3xl p-8 hover:-translate-y-2 hover:shadow-2xl hover:shadow-brand/10 transition-all duration-300 group overflow-hidden relative">
               <div className="absolute top-0 right-0 w-32 h-32 bg-brand/5 rounded-full blur-3xl group-hover:bg-brand/20 transition-colors" />
@@ -282,27 +247,26 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* Huge CTA Section */}
-      <section className="py-24 px-6 relative">
+      {/* CTA */}
+      <section className="py-16 sm:py-24 px-4 sm:px-6 relative">
         <div className="max-w-6xl mx-auto">
-          <div className="relative rounded-[3rem] overflow-hidden bg-txt text-page py-24 px-8 text-center shadow-2xl">
-            {/* Fancy Background inside CTA */}
+          <div className="relative rounded-[2rem] sm:rounded-[3rem] overflow-hidden bg-txt text-page py-16 sm:py-24 px-6 sm:px-8 text-center shadow-2xl">
             <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-brand via-transparent to-transparent blur-2xl" />
             
             <div className="relative z-10 max-w-3xl mx-auto">
-              <h2 className="text-4xl lg:text-6xl font-black mb-6 tracking-tight">
+              <h2 className="text-3xl sm:text-4xl lg:text-6xl font-black mb-4 sm:mb-6 tracking-tight">
                 Stop studying hard.<br />Start studying smart.
               </h2>
-              <p className="text-xl opacity-80 mb-10 font-medium">
+              <p className="text-lg sm:text-xl opacity-80 mb-8 sm:mb-10 font-medium">
                 Join the platform that is changing how top-tier students prepare for their most important exams.
               </p>
               <button
                 onClick={() => navigate("/signup")}
-                className="px-10 py-5 bg-brand text-white rounded-full font-black text-xl hover:scale-105 active:scale-95 transition-all shadow-xl shadow-brand/30 flex items-center gap-3 mx-auto group"
+                className="px-8 sm:px-10 py-4 sm:py-5 bg-brand text-white rounded-full font-black text-lg sm:text-xl hover:scale-105 active:scale-95 transition-all shadow-xl shadow-brand/30 flex items-center gap-3 mx-auto group"
               >
                 Create your free account
-                <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center group-hover:bg-white/30 transition-colors">
-                  <ArrowRight className="w-5 h-5" />
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/20 flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                  <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
               </button>
               <p className="mt-6 text-sm opacity-60 font-medium">Takes 30 seconds • No credit card required</p>
@@ -312,21 +276,21 @@ const Landing = () => {
       </section>
 
       {/* Footer */}
-      <footer className="py-12 border-t border-border/40 bg-page/80 backdrop-blur-md relative z-10">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-6">
+      <footer className="py-8 sm:py-12 border-t border-border/40 bg-page/80 backdrop-blur-md relative z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 sm:gap-6">
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-              <div className="w-8 h-8 rounded-xl bg-txt flex items-center justify-center shadow-md">
-                <img src={logo} alt="QPGPT" className="w-6 h-6 object-contain" />
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-txt flex items-center justify-center shadow-md">
+                <img src={logo} alt="QPGPT" className="w-5 h-5 sm:w-6 sm:h-6 object-contain" />
               </div>
-              <span className="font-black text-xl tracking-tighter text-txt">QPGPT</span>
+              <span className="font-black text-lg sm:text-xl tracking-tighter text-txt">QPGPT</span>
             </div>
-            <div className="flex gap-8 text-sm font-semibold text-muted">
+            <div className="flex flex-wrap justify-center gap-4 sm:gap-8 text-sm font-semibold text-muted">
               <a href="#/privacy" className="hover:text-brand transition-colors">Privacy Policy</a>
               <a href="#/terms" className="hover:text-brand transition-colors">Terms of Service</a>
               <a href="#/contact" className="hover:text-brand transition-colors">Contact Support</a>
             </div>
-            <p className="text-sm font-medium text-muted/60">© {new Date().getFullYear()} QPGPT. All rights reserved.</p>
+            <p className="text-xs sm:text-sm font-medium text-muted/60 text-center">© {new Date().getFullYear()} QPGPT. All rights reserved.</p>
           </div>
         </div>
       </footer>

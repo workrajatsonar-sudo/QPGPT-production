@@ -1,6 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { getCachedProfile } from '../lib/auth';
 import { 
   BookOpen, Download, Users, FolderOpen, FileText, Upload, Search, 
   Layers, ArrowRight, Clock, FilePlus, Sparkles, TrendingUp
@@ -20,8 +21,8 @@ const Dashboard: React.FC<DashboardProps> = ({ userRole }) => {
 
   useEffect(() => {
     const fetchData = async () => {
-        const userSession = localStorage.getItem('qb_user');
-        if (userSession) setUserName(JSON.parse(userSession).full_name || 'User');
+        const cachedUser = getCachedProfile();
+        if (cachedUser) setUserName(cachedUser.full_name || 'User');
 
         const [files, downloads, subjects] = await Promise.all([
           supabase.from('files').select('*', { count: 'exact', head: true }),

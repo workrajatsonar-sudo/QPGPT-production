@@ -261,7 +261,7 @@ const QPGPT = () => {
   ];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] font-sans relative overflow-hidden bg-page text-txt">
+    <div className="flex flex-col h-[calc(100dvh-64px)] font-sans relative overflow-hidden bg-page text-txt">
       
       {/* 1. Immersive DeepSeek Background */}
       <div className="absolute inset-0 pointer-events-none z-0">
@@ -410,9 +410,6 @@ const QPGPT = () => {
 
                <div className="flex items-center justify-between px-2 pb-1">
                   <div className="flex items-center gap-1.5">
-                     <button onClick={() => fileInputRef.current?.click()} className="p-2.5 text-muted hover:text-brand hover:bg-brand/10 rounded-full transition-all">
-                        <Paperclip className="w-5 h-5" />
-                     </button>
                      <div className="w-px h-5 bg-border mx-1"></div>
                      <button 
                         onClick={() => setActiveMode('deepthink')}
@@ -442,7 +439,7 @@ const QPGPT = () => {
                </div>
             </div>
 
-            {/* Hidden Input */}
+            {/* Hidden Input - kept for possible future use */}
             <input type="file" ref={fileInputRef} className="hidden" onChange={e => setAttachedFile(e.target.files?.[0] || null)} />
          </div>
       </div>

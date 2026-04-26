@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import ConfirmModal from '../components/ConfirmModal';
 import { supabase } from '../lib/supabase';
+import { getCachedProfile } from '../lib/auth';
 import { UserProfile, Role } from '../types';
 import { 
   Users as UsersIcon, 
@@ -57,10 +58,7 @@ const Users = () => {
   // --- Effects ---
   useEffect(() => {
     // Get current admin user for logging/safety checks
-    const userStr = localStorage.getItem('qb_user');
-    if (userStr) {
-      setCurrentUser(JSON.parse(userStr));
-    }
+    setCurrentUser(getCachedProfile());
     fetchUsers();
   }, []);
 

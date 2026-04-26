@@ -1,6 +1,5 @@
 
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
 import { 
   GraduationCap, 
   BookOpen, 
@@ -13,8 +12,7 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import bcrypt from 'bcryptjs';
-import { UserProfile } from '../types';
+import { signUpStudent } from '../lib/auth';
 
 const Signup = () => {
   const navigate = useNavigate();
@@ -72,68 +70,35 @@ const Signup = () => {
     setLoading(true);
 
     try {
-        // 1. Check Duplicates
-        console.log('Checking for duplicate:', { email: formData.email, username: formData.username });
-        const { data: existing, error: checkError } = await supabase
-            .from('users')
-            .select('id')
-            .or(`email.eq.${formData.email},username.eq.${formData.username}`)
-            .maybeSingle();
-        
-        console.log('Duplicate check response:', { existing, error: checkError });
-        if (checkError) throw checkError;
+        const result = await signUpStudent({
+          full_name: formData.full_name,
+          email: formData.email,
+          username: formData.username,
+          password: formData.password,
+          grade_year: formData.grade_year,
+          level_of_study: formData.level_of_study,
+          course_stream: formData.course_stream,
+          exam_type: formData.exam_type,
+          subjects_of_interest: formData.subjects_of_interest
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean),
+        });
 
-        if (existing) throw new Error("User with this email or username already exists.");
+        if (result.needsEmailVerification) {
+          navigate('/login', {
+            replace: true,
+            state: { message: 'Account created. Please verify your email before signing in.' }
+          });
+          return;
+        }
 
-        // 2. Hash Password
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(formData.password, salt);
-
-        // 3. Prepare Payload
-        const payload: Partial<UserProfile> = {
-            role: 'student',
-            full_name: formData.full_name,
-            username: formData.username,
-            email: formData.email,
-            password: hashedPassword,
-            status: 'active',
-            created_at: new Date().toISOString(),
-            grade_year: formData.grade_year,
-            level_of_study: formData.level_of_study,
-            course_stream: formData.course_stream,
-            exam_type: formData.exam_type,
-            subjects_of_interest: formData.subjects_of_interest.split(',').map(s => s.trim()).filter(Boolean)
-        };
-
-        // 4. Insert
-        const { data: newUser, error: insertError } = await supabase
-            .from('users')
-            .insert(payload)
-            .select()
-            .single();
-
-        if (insertError) throw insertError;
-
-        // 5. Success
-        completeSession(newUser);
-
+        navigate(`/dashboard/${result.profile.role || 'student'}`);
     } catch (err: any) {
-        console.error('Full signup error:', err);
-        console.error('Error status:', err.status);
-        console.error('Error code:', err.code);
-        console.error('Error details:', err.details);
         setError(err.message || "Registration failed. Please try again.");
     } finally {
         setLoading(false);
     }
-  };
-
-  const completeSession = (user: any) => {
-      const safeUser = { ...user, password: '' };
-      localStorage.setItem('qb_user', JSON.stringify(safeUser));
-      localStorage.setItem('qb_session_token', `mock_token_${Date.now()}`);
-      window.dispatchEvent(new Event('auth-change'));
-      navigate(`/dashboard/${user.role || 'student'}`);
   };
 
   // --- RENDERERS ---

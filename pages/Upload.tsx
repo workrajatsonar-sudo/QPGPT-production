@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { getCachedProfile } from '../lib/auth';
 import { Standard, Subject, Medium, Chapter, AppSettings, UserProfile } from '../types';
 import { Upload as UploadIcon, FileText, X, Loader2, CheckCircle, AlertTriangle, Shield, Eye, EyeOff, FolderTree } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -35,12 +36,11 @@ const UploadPage = () => {
 
   useEffect(() => {
     // 1. Auth & Role Check
-    const userStr = localStorage.getItem('qb_user');
-    if (!userStr) {
+    const parsedUser = getCachedProfile();
+    if (!parsedUser) {
       navigate('/login');
       return;
     }
-    const parsedUser = JSON.parse(userStr);
     setUser(parsedUser);
 
     if (parsedUser.role === 'student') {
@@ -197,7 +197,7 @@ const UploadPage = () => {
         throw dbError;
       }
 
-      // 4. Notify Admins (if not uploaded by an Admin)
+      // 4. Notify Admins (if not uploaded by Admin)
       if (!isAdmin) {
           const { data: admins } = await supabase.from('users').select('id').eq('role', 'admin');
           if (admins && admins.length > 0) {

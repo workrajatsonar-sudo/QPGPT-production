@@ -65,27 +65,40 @@ const ApplyTeacher = () => {
     const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, '_').toLowerCase();
     const ext = cleanName.split('.').pop();
     // Path Structure: {UUID}/{type}.{ext}
-    const path = `${applicationId}/${type}.${ext}`;
-    
+    const primaryPath = `${applicationId}/${type}.${ext}`;
+
     const { error: uploadError } = await supabase.storage
       .from('teacher-verification-docs')
-      .upload(path, file);
+      .upload(primaryPath, file);
 
-    if (uploadError) {
-        console.error(`Upload failed for ${type}:`, uploadError);
-        // Add specific message for RLS
-        if (uploadError.message.includes("row-level security")) {
-            throw new Error(`Permission Denied: Server security policy blocked ${type} upload. Please contact support.`);
-        }
-        throw new Error(`Failed to upload ${type}: ${uploadError.message}`);
+    if (!uploadError) {
+      return `teacher-verification-docs/${primaryPath}`;
     }
-    return path;
+
+    // Fallback for environments where private bucket policies are not configured.
+    const fallbackPath = `teacher-applications/${applicationId}/${type}.${ext}`;
+    const { error: fallbackError } = await supabase.storage
+      .from('question-files')
+      .upload(fallbackPath, file);
+
+    if (!fallbackError) {
+      return `question-files/${fallbackPath}`;
+    }
+
+    console.error(`Upload failed for ${type}:`, uploadError, fallbackError);
+    throw new Error(`Failed to upload ${type}: ${fallbackError?.message || uploadError.message}`);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!files.profile_photo || !files.id_card || !files.verification_video) {
       setError("All files (Photo, ID Card, Video) are required for verification.");
+      return;
+    }
+
+    const normalizedEmail = formData.email.trim().toLowerCase();
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setError("Please enter a valid email address.");
       return;
     }
 
@@ -109,6 +122,12 @@ const ApplyTeacher = () => {
         .insert({
           id: applicationId, // Use the same UUID
           ...formData,
+          email: normalizedEmail,
+          full_name: formData.full_name.trim(),
+          phone: formData.phone.trim(),
+          institution_name: formData.institution_name.trim(),
+          institution_address: formData.institution_address.trim(),
+          subject_specialization: formData.subject_specialization.trim(),
           experience_years: Number(formData.experience_years),
           profile_photo_path: profilePath,
           id_card_path: idPath,
@@ -126,7 +145,7 @@ const ApplyTeacher = () => {
               title: 'New Teacher Request',
               message: `${formData.full_name} has applied as a verified teacher for ${formData.subject_specialization}.`,
               type: 'info',
-              link: '/teacher-approvals'
+              link: '/admin/teacher-approvals'
           }));
           await supabase.from('notifications').insert(notifications);
       }

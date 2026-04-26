@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase, downloadFile, getStorageUrl } from '../lib/supabase';
+import { getCachedProfile } from '../lib/auth';
 import { 
   Search, FileText, Grid3x3, List, Download, Eye, Trash2, X, Loader2,
   Clock, Lock, Globe, CheckCircle
@@ -15,11 +16,25 @@ const Questions = () => {
   const [filters, setFilters] = useState({ standard: '', subject: '', type: '' });
   const [isAdmin, setIsAdmin] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [previewState, setPreviewState] = useState<{
+    open: boolean;
+    loading: boolean;
+    error: string | null;
+    title: string;
+    blobUrl: string | null;
+  }>({
+    open: false,
+    loading: false,
+    error: null,
+    title: '',
+    blobUrl: null,
+  });
   const latestQueryRef = useRef(searchQuery);
+  const previewUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     latestQueryRef.current = searchQuery;
-    const user = JSON.parse(localStorage.getItem('qb_user') || '{}');
+    const user = getCachedProfile() || ({} as any);
     setIsAdmin(user.role === 'admin');
     setCurrentUserId(user.id || null);
     const timer = setTimeout(() => {
@@ -55,9 +70,86 @@ const Questions = () => {
 
   const handleDownload = (path: string) => { downloadFile(path); };
 
-  const handleView = (path: string) => {
-    const url = getStorageUrl(path);
-    window.open(url, '_blank');
+  const getCleanStoragePath = (path: string) => {
+    if (!path) return '';
+    if (!path.startsWith('http')) return path.replace(/^question-files\//, '').replace(/^\/+/, '');
+
+    const publicMarker = '/storage/v1/object/public/question-files/';
+    const signedMarker = '/storage/v1/object/sign/question-files/';
+    const publicIndex = path.indexOf(publicMarker);
+    const signedIndex = path.indexOf(signedMarker);
+
+    let cleanPath = path;
+    if (publicIndex >= 0) {
+      cleanPath = path.substring(publicIndex + publicMarker.length);
+    } else if (signedIndex >= 0) {
+      cleanPath = path.substring(signedIndex + signedMarker.length).split('?')[0];
+    }
+
+    try {
+      cleanPath = decodeURIComponent(cleanPath);
+    } catch {
+      // Keep raw path if decode fails
+    }
+
+    return cleanPath.replace(/^\/+/, '').replace(/^question-files\//, '');
+  };
+
+  const clearPreviewObjectUrl = () => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+  };
+
+  const closePreview = () => {
+    clearPreviewObjectUrl();
+    setPreviewState({
+      open: false,
+      loading: false,
+      error: null,
+      title: '',
+      blobUrl: null,
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      clearPreviewObjectUrl();
+    };
+  }, []);
+
+  const handleView = async (paper: FileRecord) => {
+    setPreviewState({
+      open: true,
+      loading: true,
+      error: null,
+      title: paper.title || 'Preview',
+      blobUrl: null,
+    });
+
+    try {
+      clearPreviewObjectUrl();
+      const cleanPath = getCleanStoragePath(paper.file_path);
+      const { data, error } = await supabase.storage.from('question-files').download(cleanPath);
+      if (error || !data) throw new Error(error?.message || 'Unable to load preview.');
+
+      const blob = data.type ? data : new Blob([data], { type: 'application/pdf' });
+      const blobUrl = URL.createObjectURL(blob);
+      previewUrlRef.current = blobUrl;
+
+      setPreviewState(prev => ({
+        ...prev,
+        loading: false,
+        blobUrl,
+      }));
+    } catch (err: any) {
+      setPreviewState(prev => ({
+        ...prev,
+        loading: false,
+        error: err?.message || 'Preview failed to load.',
+      }));
+    }
   };
 
   const handleDelete = async (e: React.MouseEvent, file: FileRecord) => {
@@ -223,7 +315,7 @@ const Questions = () => {
                 <div className={`flex items-center gap-2 ${viewMode === 'grid' ? 'mt-4 pt-4 border-t border-border w-full justify-between' : 'flex-shrink-0 ml-4'}`}>
                   <span className="text-xs text-muted font-medium">{paper.download_count} DLs</span>
                   <div className="flex gap-2">
-                    <button onClick={() => handleView(paper.file_path)} className="p-1.5 hover:bg-brand/10 hover:text-brand rounded text-muted transition-colors" title="View PDF">
+                    <button onClick={() => handleView(paper)} className="p-1.5 hover:bg-brand/10 hover:text-brand rounded text-muted transition-colors" title="View PDF">
                       <Eye className="w-4 h-4" />
                     </button>
                     <button onClick={() => handleDownload(paper.file_path)} className="p-1.5 hover:bg-brand hover:text-white rounded text-muted transition-colors" title="Download">
@@ -246,6 +338,57 @@ const Questions = () => {
           </div>
         )}
       </div>
+
+      {/* In-app preview modal using blob URL (hides direct Supabase URL from address bar) */}
+      {previewState.open && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex flex-col">
+          <div className="px-4 py-3 bg-card border-b border-border flex items-center justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-txt truncate">{previewState.title}</p>
+              <p className="text-[11px] text-muted">Secure preview mode</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {previewState.blobUrl && (
+                <a
+                  href={previewState.blobUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border text-txt hover:bg-page transition-colors"
+                >
+                  Open
+                </a>
+              )}
+              <button
+                onClick={closePreview}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:opacity-90 transition-opacity"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 bg-page p-3">
+            {previewState.loading ? (
+              <div className="h-full w-full rounded-xl border border-border bg-card flex flex-col items-center justify-center text-muted">
+                <Loader2 className="w-6 h-6 animate-spin mb-2" />
+                <p className="text-sm">Loading preview...</p>
+              </div>
+            ) : previewState.error ? (
+              <div className="h-full w-full rounded-xl border border-border bg-card flex flex-col items-center justify-center text-red-500 px-6 text-center">
+                <X className="w-8 h-8 mb-2" />
+                <p className="font-semibold mb-1">Preview failed</p>
+                <p className="text-sm">{previewState.error}</p>
+              </div>
+            ) : previewState.blobUrl ? (
+              <iframe
+                src={previewState.blobUrl}
+                title="Secure PDF Preview"
+                className="w-full h-full rounded-xl border border-border bg-card"
+              />
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

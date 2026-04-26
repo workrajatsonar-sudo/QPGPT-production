@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { GoogleGenAI } from "@google/genai";
+import { generateAIContent } from '../lib/ai';
 import { 
   BrainCircuit, 
   Upload, 
@@ -145,8 +145,6 @@ const Quizlein = () => {
     setRetryMode(isRetry);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
       const userPrompt = `
         INPUT PARAMETERS:
         - Quiz Type: ${config.type}
@@ -174,20 +172,18 @@ const Quizlein = () => {
       
       parts.push({ text: userPrompt });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: { parts },
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: 'application/json',
-          temperature: 0.4
-        }
+      const text = await generateAIContent({
+        model: 'gemini-2.5-flash',
+        parts,
+        systemInstruction: SYSTEM_INSTRUCTION,
+        responseMimeType: 'application/json',
+        temperature: 0.4
       });
 
-      const text = response.text;
       if (!text) throw new Error("No content generated");
 
-      const parsed: QuizResult = JSON.parse(text);
+      const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+      const parsed: QuizResult = JSON.parse(cleanText);
       setResult(parsed);
       
       // Update history for next retry

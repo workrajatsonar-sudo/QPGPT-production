@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
@@ -19,249 +19,114 @@ import AuthCallback from './pages/AuthCallback';
 import Signup from './pages/Signup';
 import ApplyTeacher from './pages/ApplyTeacher'; // New Import
 import TeacherApprovals from './pages/TeacherApprovals'; // New Import
+import Debug from './pages/Debug';
 import Landing from './pages/Landing';
 import QPGPT from './pages/QPGPT';
 import QuizGame from './pages/QuizGame';
-import { UserProfile, AppSettings } from './types';
+import { UserProfile } from './types';
 import { supabase } from './lib/supabase';
+import { syncProfileFromSession, getCachedProfile } from './lib/auth';
 
 const App = () => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
-  const isOAuthCallbackPath = window.location.pathname === '/auth-callback';
-  const isOAuthReturn =
-    window.location.pathname === '/auth-callback' ||
-    window.location.search.includes('code=') ||
-    window.location.hash.includes('access_token=');
+  const authCheckCounterRef = useRef(0);
 
-  const setLocalSessionUser = (profile: any, tokenPrefix: 'mock_token' | 'oauth_token' = 'oauth_token') => {
-    const safeUser = { ...profile, password: '' };
-    localStorage.setItem('qb_user', JSON.stringify(safeUser));
-    localStorage.setItem('qb_session_token', `${tokenPrefix}_${Date.now()}`);
-    setUser({ ...safeUser, role: safeUser.role?.toLowerCase() });
-    setLoading(false);
-    return safeUser;
-  };
-
-  const clearLocalSessionUser = () => {
-    localStorage.removeItem('qb_user');
-    localStorage.removeItem('qb_session_token');
-    setUser(null);
-  };
-
-  const findUserByEmail = async (email?: string | null) => {
-    const normalizedEmail = email?.trim().toLowerCase();
-    if (!normalizedEmail) return null;
-
-    const { data: exactProfile } = await supabase
-      .from('users')
-      .select('*')
-      .ilike('email', normalizedEmail)
-      .maybeSingle();
-
-    if (exactProfile) return exactProfile;
-
-    const { data: possibleProfiles } = await supabase
-      .from('users')
-      .select('*')
-      .ilike('email', `%${normalizedEmail}%`)
-      .limit(10);
-
-    return (possibleProfiles || []).find(
-      (profile: any) => profile.email?.trim().toLowerCase() === normalizedEmail
-    ) || null;
+  const areProfilesEqual = (a: UserProfile | null, b: UserProfile | null) => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    return (
+      a.id === b.id &&
+      a.role === b.role &&
+      a.email === b.email &&
+      a.status === b.status
+    );
   };
 
   useEffect(() => {
-    if (isOAuthCallbackPath) {
-      const applyThemeOnly = async () => {
-        try {
-          const { data } = await supabase.from('app_settings').select('theme').maybeSingle();
-          const rawTheme = (data?.theme || 'white').toLowerCase();
-          const themeMap: Record<string, string> = {
-              'dark': 'black',
-              'night': 'black',
-              'light': 'white',
-              'default': 'white',
-              'space': 'space'
-          };
-          document.documentElement.setAttribute('data-theme', themeMap[rawTheme] || rawTheme);
-        } catch (e) {
-          document.documentElement.setAttribute('data-theme', 'white');
-        }
-      };
+    let isMounted = true;
 
-      applyThemeOnly();
-      return;
-    }
-
-    // 1. Set up Supabase Auth Listener FIRST (before anything else)
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Supabase auth event:', event, session?.user?.email);
-      if (event === 'SIGNED_IN' && session?.user) {
-        // Fetch user profile from database
-        const profile = await findUserByEmail(session.user.email);
-
-        if (profile) {
-          setLocalSessionUser(profile, 'oauth_token');
-          window.dispatchEvent(new Event('auth-change'));
-        } else {
-          await supabase.auth.signOut();
-          clearLocalSessionUser();
-          window.dispatchEvent(new Event('auth-change'));
-        }
-      } else if (event === 'SIGNED_OUT') {
-        const sessionToken = localStorage.getItem('qb_session_token') || '';
-        if (sessionToken.startsWith('oauth_token_')) {
-          clearLocalSessionUser();
-        }
-        window.dispatchEvent(new Event('auth-change'));
-      }
-    });
-
-    // 2. Auth Check
     const checkUser = async () => {
-      // First check localStorage
-      const storedUser = localStorage.getItem('qb_user');
-      const sessionToken = localStorage.getItem('qb_session_token') || '';
+      const requestId = ++authCheckCounterRef.current;
+      const legacySessionEnabled = localStorage.getItem('qb_legacy_session') === '1';
+      const cachedProfile = getCachedProfile();
 
-      if (storedUser && !isOAuthReturn) {
-        try {
-          const parsed = JSON.parse(storedUser);
-          if (parsed.role) {
-            parsed.role = parsed.role.toLowerCase();
-          }
-          setUser(parsed);
-          setLoading(false);
-          return;
-        } catch (e) {
-          console.error("Failed to parse user session", e);
-          localStorage.removeItem('qb_user');
-        }
+      // Root fix for local legacy auth flow:
+      // when legacy session marker is present, do not call Supabase session sync.
+      // Supabase getUser() can return empty and wipe local auth state.
+      if (legacySessionEnabled && cachedProfile) {
+        if (!isMounted || requestId !== authCheckCounterRef.current) return;
+        setUser((prev) => (areProfilesEqual(prev, cachedProfile) ? prev : cachedProfile));
+        setLoading(false);
+        return;
       }
 
-      if (isOAuthReturn) {
-        const currentUrl = new URL(window.location.href);
-        const searchParams = currentUrl.searchParams;
-        const hashParams = new URLSearchParams(currentUrl.hash.replace(/^#/, ''));
-        const authCode = searchParams.get('code');
-        const accessToken = hashParams.get('access_token');
-        const refreshToken = hashParams.get('refresh_token');
-
-        if (authCode) {
-          const { error } = await supabase.auth.exchangeCodeForSession(authCode);
-          if (error) {
-            console.warn('OAuth code exchange warning:', error.message);
-          }
-        } else if (accessToken && refreshToken) {
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (error) {
-            console.warn('OAuth token restore warning:', error.message);
-          }
-        }
-
-        const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-        let authUser: any = null;
-
-        for (let attempt = 0; attempt < 5; attempt++) {
-          const { data: sessionData } = await supabase.auth.getSession();
-          if (sessionData?.session?.user) {
-            authUser = sessionData.session.user;
-            break;
-          }
-          await wait(300);
-        }
-
-        if (!authUser) {
-          const { data: userData } = await supabase.auth.getUser();
-          authUser = userData?.user || null;
-        }
-
-        if (authUser) {
-          const profile = await findUserByEmail(authUser.email);
-          if (profile) {
-            setLocalSessionUser(profile, 'oauth_token');
-            window.location.replace(`${window.location.origin}/#/dashboard/${profile.role || 'student'}`);
-            return;
-          }
-
-          await supabase.auth.signOut();
-          clearLocalSessionUser();
-          window.location.replace(`${window.location.origin}/#/signup`);
-          return;
-        }
-
-        await supabase.auth.signOut().catch(() => undefined);
+      try {
+        const profile = await syncProfileFromSession();
+        const fallbackProfile = getCachedProfile();
+        const nextUser = profile || fallbackProfile;
+        if (!isMounted) return;
+        if (requestId !== authCheckCounterRef.current) return;
+        setUser((prev) => (areProfilesEqual(prev, nextUser) ? prev : nextUser));
+      } catch (e) {
+        console.error('Failed to restore authenticated session', e);
+        const fallbackProfile = getCachedProfile();
+        const nextUser = fallbackProfile || null;
+        if (!isMounted || requestId !== authCheckCounterRef.current) return;
+        setUser((prev) => (areProfilesEqual(prev, nextUser) ? prev : nextUser));
+      } finally {
+        if (isMounted && requestId === authCheckCounterRef.current) setLoading(false);
       }
-
-      if (storedUser && sessionToken.startsWith('mock_token_')) {
-        try {
-          const parsed = JSON.parse(storedUser);
-          if (parsed.role) {
-            parsed.role = parsed.role.toLowerCase();
-          }
-          setUser(parsed);
-          setLoading(false);
-          return;
-        } catch (e) {
-          console.error("Failed to parse manual user session", e);
-          clearLocalSessionUser();
-        }
-      }
-
-      setUser(null);
-      setLoading(false);
     };
 
-    // 3. Theme Sync
     const applyTheme = async () => {
+      const cachedTheme = (localStorage.getItem('qb_theme') || '').toLowerCase();
+      if (cachedTheme) {
+        document.documentElement.setAttribute('data-theme', cachedTheme);
+      }
+
       try {
         const { data } = await supabase.from('app_settings').select('theme').maybeSingle();
         const rawTheme = (data?.theme || 'white').toLowerCase();
-        
         // Map common names to actual theme IDs
         const themeMap: Record<string, string> = {
-            'dark': 'black',
-            'night': 'black',
-            'light': 'white',
-            'default': 'white',
-            'space': 'space'
+          'dark': 'black',
+          'night': 'black',
+          'light': 'white',
+          'default': 'white',
+          'space': 'space'
         };
-
         const finalTheme = themeMap[rawTheme] || rawTheme;
-        document.documentElement.setAttribute('data-theme', finalTheme);
-        
+        if (document.documentElement.getAttribute('data-theme') !== finalTheme) {
+          document.documentElement.setAttribute('data-theme', finalTheme);
+        }
+        localStorage.setItem('qb_theme', finalTheme);
       } catch (e) {
-        document.documentElement.setAttribute('data-theme', 'white');
+        if (!document.documentElement.getAttribute('data-theme')) {
+          document.documentElement.setAttribute('data-theme', 'white');
+        }
       }
     };
 
     checkUser();
     applyTheme();
 
+    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+      checkUser();
+    });
     window.addEventListener('auth-change', checkUser);
     window.addEventListener('theme-change', applyTheme);
 
     return () => {
+      isMounted = false;
+      if (authListener?.subscription) authListener.subscription.unsubscribe();
       window.removeEventListener('auth-change', checkUser);
       window.removeEventListener('theme-change', applyTheme);
-      authListener.subscription.unsubscribe();
     };
   }, []);
 
-  if (loading && !isOAuthCallbackPath) return null;
-
-  // Supabase OAuth redirects back to a pathname like /auth-callback.
-  // Since the app uses HashRouter, handle that page before routing so
-  // the callback is not mistaken for the landing page.
-  if (isOAuthCallbackPath) {
-    return <AuthCallback />;
-  }
+  if (loading) return null;
 
   // Protected Layout
   const MainLayout = () => {
@@ -338,6 +203,9 @@ const App = () => {
            {/* New Admin Route */}
            <Route path="/admin/teacher-approvals" element={
               user?.role === 'admin' ? <TeacherApprovals /> : <Navigate to={`/dashboard/${user?.role || 'student'}`} />
+           } />
+           <Route path="/admin/debug" element={
+              user?.role === 'admin' ? <Debug /> : <Navigate to={`/dashboard/${user?.role || 'student'}`} />
            } />
            <Route path="/users" element={
               user?.role === 'admin' ? <Users /> : <Navigate to={`/dashboard/${user?.role || 'student'}`} />

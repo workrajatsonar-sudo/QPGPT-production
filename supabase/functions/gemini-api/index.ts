@@ -19,28 +19,29 @@ serve(async (req) => {
       throw new Error("GEMINI_API_KEY is not configured in Supabase Edge Secrets.");
     }
 
+
     // Parse incoming request context (from lib/ai.ts payload)
-    const { parts, systemInstruction, temperature, model = 'gemini-3-flash-preview', responseMimeType } = await req.json()
+    const { parts, systemInstruction, temperature, model = 'gemini-1.5-flash', responseMimeType } = await req.json();
 
     // Initialize the official SDK
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    
+
     // Execute AI request
     const response = await ai.models.generateContent({
-        model: model,
-        contents: { parts },
-        config: {
-            systemInstruction,
-            temperature: temperature || 0.7,
-            responseMimeType: responseMimeType
-        }
+      model: model,
+      contents: [{ role: 'user', parts }],
+      config: {
+        systemInstruction,
+        temperature: temperature || 0.7,
+        responseMimeType: responseMimeType
+      }
     });
 
     // Return the response back securely to your React frontend
     return new Response(
       JSON.stringify({ text: response.text }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    );
 
   } catch (error) {
     console.error("Gateway Error:", error.message)

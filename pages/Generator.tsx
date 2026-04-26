@@ -1,8 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { getCachedProfile } from '../lib/auth';
 import { jsPDF } from 'jspdf';
 import { generateAIContent } from '../lib/ai';
+import ConfirmModal from '../components/ConfirmModal';
 import { 
   FileText, 
   Upload, 
@@ -34,6 +36,25 @@ interface QuestionConfig {
   enabled: boolean;
 }
 
+interface StructuredQuestion {
+  question_no: number;
+  question_text: string;
+  options?: string[];
+}
+
+interface StructuredSection {
+  id: string;
+  label: string;
+  count: number;
+  marks: number;
+  questions: StructuredQuestion[];
+}
+
+interface StructuredPaper {
+  title?: string;
+  sections: StructuredSection[];
+}
+
 const DEFAULT_QUESTIONS: QuestionConfig[] = [
   { id: 'mcq', label: 'Multiple Choice Questions (MCQ)', count: 5, marks: 1, enabled: true },
   { id: 'truefalse', label: 'True / False', count: 5, marks: 1, enabled: true },
@@ -41,6 +62,95 @@ const DEFAULT_QUESTIONS: QuestionConfig[] = [
   { id: 'short', label: 'Short Answer Questions', count: 3, marks: 2, enabled: true },
   { id: 'long', label: 'Long Answer Questions', count: 2, marks: 5, enabled: true },
 ];
+
+const getSectionInstructions = (id: string): string => {
+  switch (id) {
+    case 'mcq':
+      return 'Each question must be a multiple choice question with exactly 4 options in the options array.';
+    case 'truefalse':
+      return 'Each question must be a true/false statement. Do not include options array.';
+    case 'blanks':
+      return 'Each question must be a fill in the blanks statement with a visible blank line like _____. Do not include options array.';
+    case 'short':
+      return 'Each question must require a short written answer. Do not include options array.';
+    case 'long':
+      return 'Each question must require a detailed long answer. Do not include options array.';
+    default:
+      return 'Generate the requested questions exactly.';
+  }
+};
+
+const formatGeneratedPaper = (details: {
+  examName: string;
+  board: string;
+  subject: string;
+  class: string;
+  time: string;
+  marks: string;
+  date: string;
+}, paper: StructuredPaper): string => {
+  const lines: string[] = [
+    `                     ${details.examName.toUpperCase()}`,
+    `                     ${details.board.toUpperCase()}`,
+    '',
+    `Subject: ${details.subject}                                        Class: ${details.class}`,
+    `Time: ${details.time}                                              Max Marks: ${details.marks}`,
+    `Date: ${details.date}`,
+    '',
+    'INSTRUCTIONS:',
+    '1. All questions are compulsory.',
+    '2. Figures in the right margin indicate marks.',
+    '',
+    '-----------------------------------------------------------------------',
+    ''
+  ];
+
+  let questionNumber = 1;
+
+  paper.sections.forEach((section) => {
+    lines.push(`${section.label.toUpperCase()} (${section.marks} Marks each)`);
+    lines.push('');
+
+    section.questions.forEach((question) => {
+      lines.push(`Q${questionNumber}. ${question.question_text} (${section.marks})`);
+
+      if (section.id === 'mcq' && question.options?.length) {
+        lines.push(`   (A) ${question.options[0]}   (B) ${question.options[1]}   (C) ${question.options[2]}   (D) ${question.options[3]}`);
+      }
+
+      questionNumber += 1;
+      lines.push('');
+    });
+  });
+
+  return lines.join('\n').trim();
+};
+
+const validateStructuredPaper = (paper: StructuredPaper, expectedSections: QuestionConfig[]): string | null => {
+  if (!paper?.sections || !Array.isArray(paper.sections)) {
+    return 'AI response did not include valid sections.';
+  }
+
+  for (const expected of expectedSections) {
+    const actual = paper.sections.find(section => section.id === expected.id);
+    if (!actual) {
+      return `Missing section: ${expected.label}.`;
+    }
+
+    if (!Array.isArray(actual.questions) || actual.questions.length !== expected.count) {
+      return `${expected.label} must contain exactly ${expected.count} questions.`;
+    }
+
+    if (actual.id === 'mcq') {
+      const hasInvalidMcq = actual.questions.some(question => !Array.isArray(question.options) || question.options.length !== 4);
+      if (hasInvalidMcq) {
+        return 'Each MCQ must contain exactly 4 options.';
+      }
+    }
+  }
+
+  return null;
+};
 
 const GenerationLoader = () => {
   const [progress, setProgress] = useState(0);
@@ -172,14 +282,15 @@ const Generator = () => {
   });
   
   const [statusMsg, setStatusMsg] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+  const [showTeacherPublishModal, setShowTeacherPublishModal] = useState(false);
 
   // Metadata Cache for IDs
   const [standards, setStandards] = useState<Standard[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
 
   useEffect(() => {
-     const userStr = localStorage.getItem('qb_user');
-     if (userStr) setUser(JSON.parse(userStr));
+     const cachedUser = getCachedProfile();
+     if (cachedUser) setUser(cachedUser);
      
      const fetchInitData = async () => {
         const { data: std } = await supabase.from('standards').select('*');
@@ -258,45 +369,47 @@ const Generator = () => {
     setSubmissionSuccess(false);
 
     try {
-
-        const questionConfig = questions
-            .filter(q => q.enabled && q.count > 0)
-            .map(q => `SECTION - ${q.label.toUpperCase()} (${q.marks} Marks each)\nGenerate ${q.count} questions.`)
-            .join('\n\n');
+        const enabledQuestions = questions.filter(q => q.enabled && q.count > 0);
+        const sectionConfig = enabledQuestions
+            .map(q => `- id: ${q.id}\n  label: ${q.label}\n  count: ${q.count}\n  marks: ${q.marks}\n  rule: ${getSectionInstructions(q.id)}`)
+            .join('\n');
 
         const prompt = `
-            STRICT OUTPUT FORMAT RULES:
-            1. DO NOT use Markdown formatting (NO **, NO ##, NO *).
-            2. DO NOT use quotation marks around the paper.
-            3. Output MUST be plain academic text.
-            4. Center the title and header details visually using spaces.
-            5. Section titles MUST be in ALL CAPS.
-            6. Number questions clearly (Q1, Q2...).
-            7. Options formatted as (A), (B), (C), (D).
-            
-            REQUIRED LAYOUT:
-            
-                             ${details.examName.toUpperCase()}
-                             ${details.board.toUpperCase()}
-            
-            Subject: ${details.subject}                                        Class: ${details.class}
-            Time: ${details.time}                                              Max Marks: ${details.marks}
-            Date: ${details.date}
-            
-            INSTRUCTIONS:
-            1. All questions are compulsory.
-            2. Figures in the right margin indicate marks.
-            
-            -----------------------------------------------------------------------
+            Generate an exam paper STRICTLY from the provided source content.
 
-            ${questionConfig}
-            
-            INSTRUCTIONS FOR QUESTIONS:
-            - Number questions Q1, Q2, Q3...
-            - For MCQs, use format: (A) Option   (B) Option   (C) Option   (D) Option
-            - Ensure clean spacing between questions.
-            - Do not include answers or explanations.
-            - Use a formal, academic tone.
+            You must follow this question structure exactly:
+            ${sectionConfig}
+
+            HARD RULES:
+            1. Return STRICT JSON ONLY.
+            2. Do not include markdown.
+            3. Do not include answers or explanations.
+            4. Do not add extra sections.
+            5. Do not change the section counts.
+            6. The questions array length for each section must exactly match the requested count.
+            7. For MCQ section only, every question must contain exactly 4 options.
+            8. For True / False, Fill in the Blanks, Short Answer, and Long Answer, do not include options.
+            9. Keep the paper academic and classroom-ready.
+
+            REQUIRED JSON SHAPE:
+            {
+              "title": "${details.examName}",
+              "sections": [
+                {
+                  "id": "mcq",
+                  "label": "Multiple Choice Questions (MCQ)",
+                  "count": 5,
+                  "marks": 1,
+                  "questions": [
+                    {
+                      "question_no": 1,
+                      "question_text": "",
+                      "options": ["", "", "", ""]
+                    }
+                  ]
+                }
+              ]
+            }
         `;
 
         const parts: any[] = [];
@@ -316,12 +429,22 @@ const Generator = () => {
 
         const text = await generateAIContent({
             parts,
-            systemInstruction: "You are an academic exam paper generator. You must output strictly plain text without any markdown characters. Your output should look exactly like a printed test paper.",
+            systemInstruction: "You are an academic exam paper generator. Return strict JSON only, obey the requested section counts exactly, and use only the provided source content.",
             temperature: 0.3,
-            model: 'gemini-3-flash-preview'
+            model: 'gemini-2.5-flash',
+            responseMimeType: 'application/json'
         });
         if (text) {
-            setGeneratedContent(text);
+            const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+            const parsed: StructuredPaper = JSON.parse(cleanText);
+            const validationError = validateStructuredPaper(parsed, enabledQuestions);
+
+            if (validationError) {
+                throw new Error(validationError);
+            }
+
+            const formattedPaper = formatGeneratedPaper(details, parsed);
+            setGeneratedContent(formattedPaper);
             setIsEditable(true);
         } else {
             throw new Error("No content generated.");
@@ -390,7 +513,7 @@ const Generator = () => {
 
         // 2. Insert into 'files' table as Source of Truth
         // CRITICAL: We use .select().single() to return the created record to confirm success
-        const { data: fileData, error: dbError } = await supabase.from('files').insert({
+        const { error: dbError } = await supabase.from('files').insert({
             title: `${details.subject} - ${details.examName} (${details.class})`,
             description: "[AI Generated] Auto-generated question paper via QBank Pro Generator.",
             file_path: filePath,
@@ -402,8 +525,10 @@ const Generator = () => {
             type: 'practice', 
             approval_status: status, 
             visibility: visibility,
-            source: 'generator' // Mandatory field for tracking generated content
-        }).select().single();
+            source: 'generator',
+            is_seen: status === 'pending' ? false : true,
+            seen_at: null
+        });
 
         if (dbError) throw new Error("Database insert failed: " + dbError.message);
 
@@ -423,7 +548,7 @@ const Generator = () => {
         }
 
         const successMsg = status === 'pending' 
-            ? "Request sent to Admin! Check Dashboard." 
+            ? "Your paper was submitted for admin approval. It is pending and not published yet." 
             : "Paper published to Question Bank!";
             
         setStatusMsg({ msg: successMsg, type: 'success' });
@@ -449,6 +574,16 @@ const Generator = () => {
 
   return (
     <div className="min-h-screen bg-page pb-12 font-sans transition-colors duration-300">
+      <ConfirmModal
+        isOpen={showTeacherPublishModal}
+        onClose={() => setShowTeacherPublishModal(false)}
+        onConfirm={handleTeacherRequest}
+        title="Publish To Bank?"
+        message="Your paper will not be published directly. It will first be submitted as pending for admin approval, and only after approval will it appear in the question bank."
+        type="info"
+        confirmText="Submit For Approval"
+        cancelText="Cancel"
+      />
       
       {/* Header */}
       <div className="bg-card border-b border-border sticky top-0 z-30">
@@ -656,9 +791,9 @@ const Generator = () => {
                     {submissionSuccess ? (
                         <div className="flex items-center gap-3 bg-green-50 border border-green-200 text-green-700 px-4 py-2 rounded-lg animate-in slide-in-from-right-4">
                            <CheckCircle className="w-5 h-5 text-green-600" />
-                           <span className="font-bold text-sm">Request Sent to Admin</span>
+                           <span className="font-bold text-sm">{isTeacher ? 'Pending Admin Approval' : 'Published Successfully'}</span>
                            <button 
-                             onClick={() => navigate('/questions')}
+                             onClick={() => navigate(isTeacher ? '/dashboard/teacher' : '/questions')}
                              className="ml-2 text-xs font-bold underline flex items-center gap-1 hover:text-green-800"
                            >
                              Track Status <ArrowRight className="w-3 h-3"/>
@@ -680,12 +815,18 @@ const Generator = () => {
                             {/* Teacher Request - VISIBLE & FUNCTIONAL */}
                             {isTeacher && (
                                 <button 
-                                onClick={handleTeacherRequest}
+                                onClick={() => setShowTeacherPublishModal(true)}
                                 disabled={!hasContent}
                                 className="flex items-center gap-2 px-6 py-2 bg-brand text-inv rounded-lg hover:bg-brand-hover font-bold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                                 >
-                                <Upload className="w-4 h-4" /> Request Approval
+                                <Upload className="w-4 h-4" /> Publish to Bank
                                 </button>
+                            )}
+
+                            {!isTeacher && !isAdmin && (
+                                <div className="text-xs text-muted px-3 py-2 rounded-lg bg-page border border-border">
+                                  Students can generate and download papers, but only teachers and admins can publish them.
+                                </div>
                             )}
                         </>
                     )}

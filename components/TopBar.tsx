@@ -13,6 +13,7 @@ import {
 import { UserProfile } from "../types";
 import { useNavigate, useLocation } from "react-router-dom";
 import ConfirmModal from "./ConfirmModal";
+import { signOutUser } from "../lib/auth";
 
 interface TopBarProps {
   user: UserProfile;
@@ -108,10 +109,8 @@ const TopBar: React.FC<TopBarProps> = ({ user, toggleSidebar }) => {
     setIsLogoutConfirmOpen(true);
   };
 
-  const performLogout = () => {
-    localStorage.removeItem("qb_user");
-    localStorage.removeItem("qb_session_token");
-    window.dispatchEvent(new Event("auth-change"));
+  const performLogout = async () => {
+    await signOutUser();
     navigate("/login");
   };
 
@@ -198,7 +197,8 @@ const TopBar: React.FC<TopBarProps> = ({ user, toggleSidebar }) => {
           {theme === "space" && <Monitor className="w-5 h-5" />}
         </button>
 
-        {/* Notifications */}
+        {/* Notifications — only for teacher and admin roles */}
+        {user.role !== 'student' && (
         <div className="relative">
           <button
             onClick={() => setIsNotifOpen(!isNotifOpen)}
@@ -257,6 +257,15 @@ const TopBar: React.FC<TopBarProps> = ({ user, toggleSidebar }) => {
                           <p className="text-[11px] text-muted line-clamp-2 leading-relaxed">
                             {n.message}
                           </p>
+                          {/* Show rejection reason prominently */}
+                          {n.type === 'error' && n.message?.includes('Reason:') && (
+                            <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-100 dark:border-red-800">
+                              <p className="text-[10px] font-bold text-red-600 mb-0.5">Rejection Reason:</p>
+                              <p className="text-[11px] text-red-700 dark:text-red-400">
+                                {n.message.split('Reason:')[1]?.trim()}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -275,6 +284,7 @@ const TopBar: React.FC<TopBarProps> = ({ user, toggleSidebar }) => {
             </>
           )}
         </div>
+        )}
 
         {/* User Profile */}
         <div className="relative">

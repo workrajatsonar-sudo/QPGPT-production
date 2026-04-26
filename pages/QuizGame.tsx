@@ -265,7 +265,7 @@ const QuizGame = () => {
       parts.push({ text: userPrompt });
 
       const text = await generateAIContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.5-flash',
         parts,
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: 'application/json',
@@ -274,7 +274,9 @@ const QuizGame = () => {
 
       if (!text) throw new Error("Failed to generate quiz data.");
 
-      const data: QuizData = JSON.parse(text);
+      // Strip markdown code fences if Gemini wraps the JSON (e.g. ```json ... ```)
+      const cleanText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+      const data: QuizData = JSON.parse(cleanText);
       setQuizData(data);
       setGameState('playing');
       setCurrentQIndex(0);
@@ -401,43 +403,68 @@ const QuizGame = () => {
   if (gameState === 'finished' && quizData) {
     const badge = getBadge();
     const BadgeIcon = badge.icon;
+    const accuracy = Math.round((score / quizData.questions.length) * 100);
 
     return (
       <div className="max-w-4xl mx-auto p-4 md:p-8 space-y-8 animate-in zoom-in-95 duration-700 font-sans min-h-[80vh] flex flex-col justify-center">
          
          {/* Premium Badge & Score Card */}
-         <div className={`relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br ${badge.gradient} shadow-2xl text-center p-8 md:p-14 group`}>
-             {/* Animated Glow Effects behind the card content */}
+         <div className={`relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br ${badge.gradient} shadow-[0_30px_120px_rgba(0,0,0,0.28)] text-center p-6 md:p-12 group isolate`}>
+             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.32),transparent_35%),linear-gradient(135deg,rgba(255,255,255,0.16),transparent_55%)]"></div>
              <div className="absolute inset-0 bg-black/10 mix-blend-overlay"></div>
-             <div className="absolute -top-24 -left-24 w-72 h-72 bg-white/20 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-1000 ease-out"></div>
-             <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-white/20 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-1000 ease-out"></div>
+             <div className="absolute -top-20 left-1/2 h-40 w-[110%] -translate-x-1/2 rounded-full bg-white/20 blur-3xl"></div>
+             <div className="absolute inset-x-6 top-6 bottom-6 rounded-[2rem] border border-white/20"></div>
+             <div className="absolute inset-x-10 top-10 bottom-10 rounded-[1.7rem] border border-white/10"></div>
              
              <div className="relative z-10 flex flex-col items-center">
-                 {/* Badge Icon with rotating ring effect */}
-                 <div className="relative w-40 h-40 mb-8 flex items-center justify-center">
-                     <div className={`absolute inset-0 rounded-full border-4 border-dashed border-white/60 animate-[spin_10s_linear_infinite]`}></div>
-                     <div className={`absolute inset-2 rounded-full border-4 ${badge.borderColor} backdrop-blur-md bg-white/10 shadow-[0_0_40px_rgba(255,255,255,0.3)] flex items-center justify-center transition-transform hover:scale-110 duration-500`}>
-                        <BadgeIcon className={`w-20 h-20 ${badge.textColor} drop-shadow-md`} />
-                     </div>
+                 <p className="mb-4 inline-flex items-center rounded-full border border-white/30 bg-white/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.35em] text-white/85 backdrop-blur-md">
+                    Quiz Complete
+                 </p>
+
+                 <div className="relative mb-8 mt-2 flex items-end justify-center">
+                    <div className="absolute bottom-5 left-1/2 z-0 flex -translate-x-1/2 gap-10">
+                       <div className="h-28 w-10 rounded-b-[1.8rem] bg-gradient-to-b from-white/80 via-rose-200/90 to-rose-500 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.4)]"></div>
+                       <div className="h-28 w-10 rounded-b-[1.8rem] bg-gradient-to-b from-white/80 via-amber-200/90 to-amber-500 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.4)]"></div>
+                    </div>
+
+                    <div className="relative z-10 h-52 w-52 md:h-60 md:w-60">
+                       <div className="absolute inset-0 rounded-full bg-white/20 blur-2xl scale-110"></div>
+                       <div className="absolute inset-0 rounded-full border-[10px] border-white/20 bg-gradient-to-br from-white/30 via-white/10 to-white/5 shadow-[0_0_0_8px_rgba(255,255,255,0.08),0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-md"></div>
+                       <div className="absolute inset-4 rounded-full border-[6px] border-white/35 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.95),rgba(255,255,255,0.28)_38%,rgba(255,255,255,0.08)_65%,rgba(0,0,0,0.08)_100%)]"></div>
+                       <div className="absolute inset-7 rounded-full border border-white/40"></div>
+                       <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="flex h-28 w-28 md:h-32 md:w-32 items-center justify-center rounded-full bg-black/15 shadow-inner ring-1 ring-white/30">
+                             <BadgeIcon className={`h-14 w-14 md:h-16 md:w-16 ${badge.textColor} drop-shadow-[0_8px_16px_rgba(0,0,0,0.25)]`} />
+                          </div>
+                       </div>
+                       <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-white/40 bg-white/20 px-4 py-1 text-[10px] font-black uppercase tracking-[0.28em] text-white shadow-lg backdrop-blur-sm">
+                          Achievement
+                       </div>
+                    </div>
                  </div>
                  
-                 <h1 className={`text-4xl md:text-6xl font-black ${badge.textColor} mb-4 tracking-tight drop-shadow-lg`}>{badge.title}</h1>
-                 <p className={`text-lg md:text-xl text-white/90 max-w-xl mx-auto font-medium leading-relaxed drop-shadow-md`}>{badge.description}</p>
+                 <h1 className={`text-4xl md:text-6xl font-black ${badge.textColor} mb-3 tracking-tight drop-shadow-lg`}>{badge.title}</h1>
+                 <p className="text-sm font-bold uppercase tracking-[0.32em] text-white/70">Unlocked Badge</p>
+                 <p className={`mt-4 text-base md:text-lg text-white/90 max-w-2xl mx-auto font-medium leading-relaxed drop-shadow-md`}>{badge.description}</p>
                  
-                 <div className="grid grid-cols-2 gap-4 md:gap-8 mt-10 w-full max-w-md">
-                    <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-6 border border-white/20 shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-1 transition-transform duration-300">
-                       <p className={`text-xs md:text-sm uppercase tracking-[0.2em] font-bold text-white/80 mb-2`}>Final Score</p>
-                       <p className={`text-4xl md:text-5xl font-black ${badge.textColor} drop-shadow-sm`}>{score}<span className="text-2xl text-white/60">/10</span></p>
+                 <div className="grid w-full max-w-3xl grid-cols-1 gap-4 md:grid-cols-3 mt-10">
+                    <div className="rounded-[1.75rem] border border-white/20 bg-white/12 p-5 backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.14)]">
+                       <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-white/70 mb-2">Final Score</p>
+                       <p className={`text-4xl md:text-5xl font-black ${badge.textColor}`}>{score}<span className="text-2xl text-white/60">/10</span></p>
                     </div>
-                    <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-6 border border-white/20 shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-1 transition-transform duration-300">
-                       <p className={`text-xs md:text-sm uppercase tracking-[0.2em] font-bold text-white/80 mb-2`}>Time Taken</p>
-                       <p className={`text-4xl md:text-5xl font-black ${badge.textColor} drop-shadow-sm flex items-end justify-center h-full pb-1`} style={{ fontSize: '2.5rem' }}>{timeTaken}</p>
+                    <div className="rounded-[1.75rem] border border-white/20 bg-white/12 p-5 backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.14)]">
+                       <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-white/70 mb-2">Accuracy</p>
+                       <p className={`text-4xl md:text-5xl font-black ${badge.textColor}`}>{accuracy}<span className="text-2xl text-white/60">%</span></p>
+                    </div>
+                    <div className="rounded-[1.75rem] border border-white/20 bg-white/12 p-5 backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.14)]">
+                       <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-white/70 mb-2">Time Taken</p>
+                       <p className={`text-3xl md:text-4xl font-black ${badge.textColor} leading-none pt-2`}>{timeTaken}</p>
                     </div>
                  </div>
 
                  {/* Social Sharing */}
                  <div className="mt-12 flex flex-col items-center gap-6 w-full animate-in slide-in-from-bottom-8 duration-700 delay-300">
-                    <p className={`text-sm font-bold uppercase tracking-widest text-white/80 bg-black/20 px-4 py-1.5 rounded-full shadow-inner`}>Share Your Glory</p>
+                    <p className="text-sm font-bold uppercase tracking-widest text-white/80 bg-black/20 px-4 py-1.5 rounded-full shadow-inner">Share Your Glory</p>
                     
                     <div className="flex flex-wrap justify-center gap-4">
                          {/* Native Share / Primary Share */}
